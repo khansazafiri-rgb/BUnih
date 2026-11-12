@@ -1,0 +1,84 @@
+/* ---------------------------------------------------------------------------
+   Token warna BUnih.
+   Palet kategorikal (biru + jingga) sudah divalidasi untuk keterbacaan dan
+   keamanan buta warna pada kedua permukaan. Status risiko SELALU disertai ikon
+   dan teks, jadi warna tidak pernah menjadi satu-satunya penanda.
+   --------------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+
+  --plane: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-naik: #ffffff;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-redup: #898781;
+  --garis: #e1e0d9;
+  --garis-kuat: #c3c2b7;
+  --cincin: rgba(11, 11, 11, 0.1);
+
+  /* Seri kategorikal (tervalidasi) */
+  --seri-1: #2a78d6; /* tanpa Claude pribadi */
+  --seri-2: #eb6834; /* dengan Claude pribadi */
+  --seri-1-lembut: rgba(42, 120, 214, 0.12);
+  --seri-2-lembut: rgba(235, 104, 52, 0.12);
+
+  /* Status — tetap, tidak pernah dipakai sebagai warna seri */
+  --baik: #0ca30c;
+  --peringatan: #fab219;
+  --serius: #ec835a;
+  --kritis: #d03b3b;
+  --baik-teks: #006300;
+  --kritis-teks: #a62a2a;
+  --peringatan-teks: #8a5a00;
+
+  --radius: 14px;
+  --radius-kecil: 9px;
+  --sela: 16px;
+  --bayang: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 10px rgba(11, 11, 11, 0.03);
+  --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-tema='terang']) {
+    color-scheme: dark;
+    --plane: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-naik: #232322;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --ink-redup: #898781;
+    --garis: #2c2c2a;
+    --garis-kuat: #383835;
+    --cincin: rgba(255, 255, 255, 0.1);
+    --seri-1: #3987e5;
+    --seri-2: #d95926;
+    --seri-1-lembut: rgba(57, 135, 229, 0.16);
+    --seri-2-lembut: rgba(217, 89, 38, 0.16);
+    --baik-teks: #0ca30c;
+    --kritis-teks: #e66767;
+    --peringatan-teks: #fab219;
+    --bayang: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.25);
+  }
+}
+
+:root[data-tema='gelap'] {
+  color-scheme: dark;
+  --plane: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-naik: #232322;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --ink-redup: #898781;
+  --garis: #2c2c2a;
+  --garis-kuat: #383835;
+  --cincin: rgba(255, 255, 255, 0.1);
+  --seri-1: #3987e5;
+  --seri-2: #d95926;
+  --seri-1-lembut: rgba(57, 135, 229, 0.16);
+  --seri-2-lembut: rgba(217, 89, 38, 0.16);
+  --baik-teks: #0ca30c;
+  --kritis-teks: #e66767;
+  --peringatan-teks: #fab219;
+  --bayang: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.25);
+}
