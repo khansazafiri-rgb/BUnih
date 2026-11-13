@@ -154,3 +154,13 @@ export function toJakartaInstant(input: string | Date): IsoInstant {
   if (Number.isNaN(parsed.getTime())) throw new Error(`Waktu tidak valid: ${input}`);
   return nowIso(parsed);
 }
+
+/** Jumlah hari dalam bulan dari tanggal tertentu. */
+export function daysInMonth(date: IsoDate): number {
+  return diffDays(startOfMonth(date), endOfMonth(date)) + 1;
+}
+
+/** Hari Minggu penutup pekan (pekan berjalan Senin-Minggu) yang memuat tanggal ini. */
+export function endOfWeek(date: IsoDate): IsoDate {
+  return addDays(startOfWeek(date), 6);
+}

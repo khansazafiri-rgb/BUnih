@@ -14,6 +14,7 @@ import { savingsReport } from '../domain/savings.js';
 import { monthlyReport } from '../domain/reports.js';
 import { countOpenDecisions } from '../domain/decisions.js';
 import { bandingkanSkenario } from '../domain/simulate.js';
+import { slugPerbandinganBawaan } from '../domain/scenarios.js';
 import type { SimulasiHasil } from '../domain/simulate.js';
 import { DAY_RISK_LABEL } from '../domain/types.js';
 
@@ -25,7 +26,7 @@ const IKON_RISIKO: Record<string, string> = { aman: '🟢', rendah: '🟡', defi
 
 function labelKepastian(c: string): string {
   if (c === 'terverifikasi') return 'Aktual';
-  if (c === 'asumsi_sheet') return 'Asumsi Sheet';
+  if (c === 'asumsi_sheet') return 'Asumsi awal';
   return 'Perkiraan';
 }
 
@@ -298,8 +299,12 @@ export function hasilSimulasi(h: SimulasiHasil): string {
 }
 
 export function bandingSkenario(database: DB = db()): string {
-  const hasil = bandingkanSkenario(['tanpa-claude-pribadi', 'dengan-claude-pribadi'], {}, database);
-  const lines: string[] = ['<b>Dua skenario Claude</b>'];
+  const slugs = slugPerbandinganBawaan(database);
+  if (slugs.length < 2) {
+    return 'Belum ada skenario pembanding. Buat satu di web: Rencana → Skenario, misalnya "makan naik" atau "top-up terlambat".';
+  }
+  const hasil = bandingkanSkenario(slugs, {}, database);
+  const lines: string[] = ['<b>Perbandingan skenario</b>'];
   for (const h of hasil) {
     lines.push('');
     lines.push(`<b>${esc(h.nama)}</b>`);
@@ -327,7 +332,7 @@ export function bantuan(): string {
     '/minggu — rekap minggu ini',
     '/bulan — rekap bulan ini',
     '/5hari — posisi blok lima hari yang sedang berjalan',
-    '/skenario — bandingkan tanpa vs dengan Claude Pro pribadi',
+    '/skenario — bandingkan skenario rencana',
     '',
     '<b>Tagihan & anggaran</b>',
     '/tagihan — jatuh tempo, nominal, penanggung, dana yang perlu disiapkan',

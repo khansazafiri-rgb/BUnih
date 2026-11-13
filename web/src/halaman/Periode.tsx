@@ -10,7 +10,7 @@ export default function Periode() {
       <h1>Periode 5 Hari</h1>
       <p className="subjudul">
         Rekap per blok. Blok terbentuk otomatis dari tanggal awal periode dan intervalnya, yang bisa
-        diubah di Anggaran.
+        diubah di Proyeksi & simulasi.
       </p>
 
       <Wadah keadaan={data}>
@@ -21,7 +21,7 @@ export default function Periode() {
               judul="Blok periode belum dapat dibentuk"
               pesan={d.alasan ?? 'Tanggal awal periode belum dikonfirmasi.'}
               aksi={
-                <a className="tombol tombol-utama" href="#/anggaran">
+                <a className="tombol tombol-utama" href="#/rencana">
                   Isi tanggal awal periode
                 </a>
               }

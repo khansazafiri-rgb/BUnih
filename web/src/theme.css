@@ -1,29 +1,34 @@
 /* ---------------------------------------------------------------------------
-   Token warna BUnih.
-   Palet kategorikal (biru + jingga) sudah divalidasi untuk keterbacaan dan
-   keamanan buta warna pada kedua permukaan. Status risiko SELALU disertai ikon
-   dan teks, jadi warna tidak pernah menjadi satu-satunya penanda.
+   Token warna BUnih v2 — lebih terang, lebih lega, lebih mudah dibaca.
+
+   Seri warna (tervalidasi untuk keterbacaan dan buta warna di permukaan terang dan gelap):
+     biru  = PENGELUARAN dan warna utama      aqua = PEMASUKAN dan tabungan
+     jingga = pembanding/skenario lain
+   Warna mengikuti ENTITASNYA, bukan urutannya. Status risiko selalu ikon + teks, tidak pernah
+   warna saja. Aqua di atas putih berkontras 2,8:1, jadi selalu disertai label langsung.
    --------------------------------------------------------------------------- */
 :root {
   color-scheme: light;
 
-  --plane: #f9f9f7;
-  --surface: #fcfcfb;
+  --plane: #f1f5fb;
+  --surface: #ffffff;
   --surface-naik: #ffffff;
-  --ink: #0b0b0b;
-  --ink-2: #52514e;
-  --ink-redup: #898781;
-  --garis: #e1e0d9;
-  --garis-kuat: #c3c2b7;
-  --cincin: rgba(11, 11, 11, 0.1);
+  --surface-lembut: #f7f9fd;
+  --ink: #101828;
+  --ink-2: #475467;
+  --ink-redup: #667085;
+  --garis: #e4e9f2;
+  --garis-kuat: #c9d2e0;
+  --cincin: rgba(16, 24, 40, 0.1);
 
-  /* Seri kategorikal (tervalidasi) */
-  --seri-1: #2a78d6; /* tanpa Claude pribadi */
-  --seri-2: #eb6834; /* dengan Claude pribadi */
+  --seri-1: #2a78d6;
+  --seri-2: #eb6834;
+  --seri-3: #1baf7a;
   --seri-1-lembut: rgba(42, 120, 214, 0.12);
   --seri-2-lembut: rgba(235, 104, 52, 0.12);
+  --seri-3-lembut: rgba(27, 175, 122, 0.14);
+  --netral-batang: #cfd8e6;
 
-  /* Status — tetap, tidak pernah dipakai sebagai warna seri */
   --baik: #0ca30c;
   --peringatan: #fab219;
   --serius: #ec835a;
@@ -32,53 +37,77 @@
   --kritis-teks: #a62a2a;
   --peringatan-teks: #8a5a00;
 
-  --radius: 14px;
-  --radius-kecil: 9px;
+  --tint-biru: #eaf2fd;
+  --tint-hijau: #e7f6ee;
+  --tint-kuning: #fff5dc;
+  --tint-merah: #fdeaea;
+  --tint-abu: #eef2f7;
+
+  --radius: 20px;
+  --radius-kecil: 12px;
   --sela: 16px;
-  --bayang: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 10px rgba(11, 11, 11, 0.03);
+  --bayang: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 18px rgba(16, 24, 40, 0.05);
   --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-tema='terang']) {
     color-scheme: dark;
-    --plane: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-naik: #232322;
-    --ink: #f0efec;
-    --ink-2: #c3c2b7;
-    --ink-redup: #898781;
-    --garis: #2c2c2a;
-    --garis-kuat: #383835;
+    --plane: #0b0d12;
+    --surface: #14161a;
+    --surface-naik: #1b1e24;
+    --surface-lembut: #181b20;
+    --ink: #f2f4f7;
+    --ink-2: #c0c6d1;
+    --ink-redup: #98a2b3;
+    --garis: #262a33;
+    --garis-kuat: #363c49;
     --cincin: rgba(255, 255, 255, 0.1);
     --seri-1: #3987e5;
     --seri-2: #d95926;
-    --seri-1-lembut: rgba(57, 135, 229, 0.16);
-    --seri-2-lembut: rgba(217, 89, 38, 0.16);
+    --seri-3: #199e70;
+    --seri-1-lembut: rgba(57, 135, 229, 0.18);
+    --seri-2-lembut: rgba(217, 89, 38, 0.18);
+    --seri-3-lembut: rgba(25, 158, 112, 0.2);
+    --netral-batang: #363c49;
     --baik-teks: #0ca30c;
     --kritis-teks: #e66767;
     --peringatan-teks: #fab219;
-    --bayang: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.25);
+    --tint-biru: #14233a;
+    --tint-hijau: #12281f;
+    --tint-kuning: #2c2410;
+    --tint-merah: #2e1717;
+    --tint-abu: #1b1e24;
+    --bayang: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 18px rgba(0, 0, 0, 0.3);
   }
 }
 
 :root[data-tema='gelap'] {
   color-scheme: dark;
-  --plane: #0d0d0d;
-  --surface: #1a1a19;
-  --surface-naik: #232322;
-  --ink: #f0efec;
-  --ink-2: #c3c2b7;
-  --ink-redup: #898781;
-  --garis: #2c2c2a;
-  --garis-kuat: #383835;
+  --plane: #0b0d12;
+  --surface: #14161a;
+  --surface-naik: #1b1e24;
+  --surface-lembut: #181b20;
+  --ink: #f2f4f7;
+  --ink-2: #c0c6d1;
+  --ink-redup: #98a2b3;
+  --garis: #262a33;
+  --garis-kuat: #363c49;
   --cincin: rgba(255, 255, 255, 0.1);
   --seri-1: #3987e5;
   --seri-2: #d95926;
-  --seri-1-lembut: rgba(57, 135, 229, 0.16);
-  --seri-2-lembut: rgba(217, 89, 38, 0.16);
+  --seri-3: #199e70;
+  --seri-1-lembut: rgba(57, 135, 229, 0.18);
+  --seri-2-lembut: rgba(217, 89, 38, 0.18);
+  --seri-3-lembut: rgba(25, 158, 112, 0.2);
+  --netral-batang: #363c49;
   --baik-teks: #0ca30c;
   --kritis-teks: #e66767;
   --peringatan-teks: #fab219;
-  --bayang: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.25);
+  --tint-biru: #14233a;
+  --tint-hijau: #12281f;
+  --tint-kuning: #2c2410;
+  --tint-merah: #2e1717;
+  --tint-abu: #1b1e24;
+  --bayang: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 18px rgba(0, 0, 0, 0.3);
 }

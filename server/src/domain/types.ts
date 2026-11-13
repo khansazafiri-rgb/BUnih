@@ -4,7 +4,7 @@ export type Certainty = 'terverifikasi' | 'perkiraan' | 'asumsi_sheet';
 export const CERTAINTY_LABEL: Record<Certainty, string> = {
   terverifikasi: 'Aktual',
   perkiraan: 'Perkiraan',
-  asumsi_sheet: 'Asumsi Sheet',
+  asumsi_sheet: 'Asumsi awal',
 };
 
 export type SourceKind = 'gmail' | 'telegram' | 'manual' | 'csv' | 'pdf' | 'sheet';

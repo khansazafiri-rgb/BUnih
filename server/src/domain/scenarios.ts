@@ -10,6 +10,7 @@ export type ScenarioRow = {
   is_baseline: number;
   enabled_tags: string;
   overrides_json: string;
+  hidden: number;
 };
 
 export type ResolvedScenario = {
@@ -23,9 +24,13 @@ export type ResolvedScenario = {
 
 export const SKENARIO_DASAR = 'tanpa-claude-pribadi';
 
-export function listScenarios(database: DB = db()): ScenarioRow[] {
+/** Skenario yang disembunyikan tidak dihapus; hanya tidak tampil di pilihan bawaan. */
+export function listScenarios(
+  database: DB = db(),
+  opts: { termasukTersembunyi?: boolean } = {},
+): ScenarioRow[] {
   return database
-    .prepare(`SELECT * FROM scenario ORDER BY is_baseline DESC, id`)
+    .prepare(`SELECT * FROM scenario ${opts.termasukTersembunyi ? '' : 'WHERE hidden = 0'} ORDER BY is_baseline DESC, id`)
     .all() as ScenarioRow[];
 }
 
@@ -98,4 +103,15 @@ export function upsertScenario(
 
 export function deleteScenario(slug: string, database: DB = db()): void {
   database.prepare(`DELETE FROM scenario WHERE slug = ? AND is_baseline = 0`).run(slug);
+}
+
+/**
+ * Slug yang dibandingkan secara bawaan: skenario dasar, ditambah satu pembanding yang terlihat
+ * (bila ada). Tidak ada nama skenario tertentu yang ditanam di kode.
+ */
+export function slugPerbandinganBawaan(database: DB = db()): string[] {
+  const terlihat = listScenarios(database);
+  const dasar = terlihat.find((x) => x.is_baseline === 1);
+  const pembanding = terlihat.find((x) => x.is_baseline !== 1);
+  return [dasar?.slug, pembanding?.slug].filter((x): x is string => Boolean(x));
 }

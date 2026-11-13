@@ -28,7 +28,7 @@ function DetailHari({ h, onTutup }: { h: BarisHari; onTutup: () => void }) {
                   </span>
                   {d.certainty !== 'terverifikasi' && (
                     <span className="chip chip-perkiraan">
-                      {d.certainty === 'asumsi_sheet' ? 'Asumsi Sheet' : 'Perkiraan'}
+                      {d.certainty === 'asumsi_sheet' ? 'Asumsi awal' : 'Perkiraan'}
                     </span>
                   )}
                   {d.terlambat && <span className="chip chip-verifikasi">terlambat</span>}

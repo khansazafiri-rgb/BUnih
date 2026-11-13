@@ -12,7 +12,7 @@ export function dbUji(): DB {
   const database = new Database(':memory:');
   database.pragma('foreign_keys = ON');
   migrate(database);
-  seed(database);
+  seed(database, { profil: 'warisan' });
   setDatabase(database);
   return database;
 }

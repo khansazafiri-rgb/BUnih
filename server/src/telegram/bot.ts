@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { db } from '../db/index.js';
 import { formatIDR } from '../domain/money.js';
 import { addDays, dateOf, formatTanggalSingkat, nowIso, today } from '../domain/time.js';
-import { recordCashEvent } from '../domain/ledger.js';
+import { recategorize, recordCashEvent } from '../domain/ledger.js';
 import { simulasiPembelian } from '../domain/simulate.js';
 import {
   applyDecision, bagiBiaya, jadikanCompanyLangsung, jadikanHadiah, jadikanReimburseCompany,
@@ -284,12 +284,10 @@ export function createBot(): Bot | null {
       }
       if (data.startsWith('cat:')) {
         const [, evId, catId] = data.split(':');
+        recategorize(Number(evId), { category_id: Number(catId) }, 'telegram', database);
         database
-          .prepare(`UPDATE cash_event SET category_id = ?, status = 'terkonfirmasi', updated_at = ? WHERE id = ?`)
-          .run(Number(catId), nowIso(), Number(evId));
-        database
-          .prepare(`UPDATE allocation SET category_id = ? WHERE cash_event_id = ? AND purpose = 'biaya_pribadi'`)
-          .run(Number(catId), Number(evId));
+          .prepare(`UPDATE cash_event SET status = 'terkonfirmasi', updated_at = ? WHERE id = ? AND status = 'perlu_verifikasi'`)
+          .run(nowIso(), Number(evId));
         await ctx.answerCallbackQuery({ text: 'Kategori diubah' });
         await ctx.reply('Kategori sudah diperbarui.');
         return;
@@ -754,7 +752,7 @@ export async function startBot(): Promise<void> {
     { command: 'reimburse', description: 'Piutang teman dan company' },
     { command: 'belanja', description: 'Tambah pembelian' },
     { command: 'simulasi', description: 'Bolehkah aku beli ini?' },
-    { command: 'skenario', description: 'Bandingkan skenario Claude' },
+    { command: 'skenario', description: 'Bandingkan skenario rencana' },
     { command: 'koreksi', description: 'Perbaiki transaksi' },
     { command: 'bantuan', description: 'Daftar kemampuan' },
   ]);

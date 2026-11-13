@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, type Transaksi as Tx, type Keputusan } from '../api';
 import { bacaRupiah, jam, LABEL_JENIS, LABEL_STATUS_TRANSAKSI, rupiah, tanggalSingkat } from '../format';
 import { Catatan, Kartu, Kosong, useApi, Wadah } from '../components/dasar';
+import { bukaCatat, umumkanPerubahan } from '../components/FormCatat';
 
 type Kategori = { id: number; name: string; group_name: string };
 type Detail = {
@@ -18,6 +19,90 @@ const CHIP_STATUS: Record<string, string> = {
   perlu_verifikasi: 'chip-verifikasi',
   dibatalkan: 'chip-perkiraan',
 };
+
+function FormUbah({
+  id,
+  t,
+  kategori,
+  sibuk,
+  setSibuk,
+  setPesan,
+  selesai,
+}: {
+  id: number;
+  t: Tx;
+  kategori: Kategori[];
+  sibuk: boolean;
+  setSibuk: (b: boolean) => void;
+  setPesan: (s: string | null) => void;
+  selesai: () => void;
+}) {
+  const [merchant, setMerchant] = useState(t.merchant_raw ?? '');
+  const [catatan, setCatatan] = useState(t.note ?? '');
+  const [kat, setKat] = useState('');
+  const [ingat, setIngat] = useState(false);
+
+  const simpan = async () => {
+    setSibuk(true);
+    setPesan(null);
+    try {
+      const badan: Record<string, unknown> = {};
+      if (merchant.trim() !== (t.merchant_raw ?? '')) badan['merchant'] = merchant.trim() || null;
+      if (catatan.trim() !== (t.note ?? '')) badan['catatan'] = catatan.trim() || null;
+      if (kat) {
+        badan['kategori_id'] = Number(kat);
+        badan['ingat_untuk_merchant'] = ingat;
+      }
+      if (Object.keys(badan).length === 0) {
+        setPesan('Belum ada yang diubah.');
+        return;
+      }
+      await api.patch(`/transaksi/${id}/ubah`, badan);
+      setPesan('Tersimpan. Semua laporan ikut diperbarui, dan perubahannya tercatat di riwayat.');
+      umumkanPerubahan();
+      selesai();
+    } catch (err) {
+      setPesan(err instanceof Error ? err.message : 'Gagal.');
+    } finally {
+      setSibuk(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className="bidang-baris bidang-baris-2">
+        <div className="bidang">
+          <label htmlFor={`mer-${id}`}>Di mana / untuk siapa</label>
+          <input id={`mer-${id}`} value={merchant} onChange={(e) => setMerchant(e.target.value)} />
+        </div>
+        <div className="bidang">
+          <label htmlFor={`kat-${id}`}>Kategori{t.kategori ? ` (sekarang: ${t.kategori})` : ''}</label>
+          <select id={`kat-${id}`} value={kat} onChange={(e) => setKat(e.target.value)}>
+            <option value="">Biarkan seperti sekarang</option>
+            {kategori.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="bidang">
+        <label htmlFor={`cat-${id}`}>Catatan</label>
+        <input id={`cat-${id}`} value={catatan} onChange={(e) => setCatatan(e.target.value)} />
+      </div>
+      {kat && merchant.trim() && (
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600, marginBottom: 10 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={ingat} onChange={(e) => setIngat(e.target.checked)} />
+          Ingat: lain kali “{merchant.trim()}” otomatis masuk kategori ini
+        </label>
+      )}
+      <button className="tombol tombol-utama tombol-kecil" disabled={sibuk} onClick={() => void simpan()}>
+        Simpan perubahan
+      </button>
+    </div>
+  );
+}
 
 function PanelDetail({ id, onTutup, onUbah }: { id: number; onTutup: () => void; onUbah: () => void }) {
   const detail = useApi(() => api.get<Detail>(`/transaksi/${id}`), [id]);
@@ -139,33 +224,18 @@ function PanelDetail({ id, onTutup, onUbah }: { id: number; onTutup: () => void;
             </h3>
             {pesan && <Catatan>{pesan}</Catatan>}
 
-            <div className="bidang" style={{ marginTop: 10 }}>
-              <label htmlFor={`kat-${id}`}>Kategori</label>
-              <select
-                id={`kat-${id}`}
-                defaultValue=""
-                onChange={async (e) => {
-                  if (!e.target.value) return;
-                  setSibuk(true);
-                  try {
-                    await api.patch(`/transaksi/${id}`, { category_id: Number(e.target.value) });
-                    setPesan('Kategori diperbarui.');
-                    detail.muatUlang();
-                    onUbah();
-                  } finally {
-                    setSibuk(false);
-                  }
-                }}
-                disabled={sibuk}
-              >
-                <option value="">Pilih kategori…</option>
-                {(kategori.data ?? []).map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <FormUbah
+              id={id}
+              t={d.transaksi}
+              kategori={kategori.data ?? []}
+              sibuk={sibuk}
+              setSibuk={setSibuk}
+              setPesan={setPesan}
+              selesai={() => {
+                detail.muatUlang();
+                onUbah();
+              }}
+            />
 
             <div className="bidang-baris bidang-baris-2">
               <div className="bidang">
@@ -250,10 +320,14 @@ export default function Transaksi() {
   const [status, setStatus] = useState(new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('status') ?? '');
   const [jenis, setJenis] = useState('');
   const [rekening, setRekening] = useState('');
+  const [kategoriF, setKategoriF] = useState('');
+  const [dari, setDari] = useState('');
+  const [sampai, setSampai] = useState('');
   const [pilih, setPilih] = useState<number | null>(null);
   const [nonce, setNonce] = useState(0);
 
   const rekeningData = useApi(() => api.get<{ daftar: Array<{ id: number; name: string }> }>('/rekening'), []);
+  const kategoriData = useApi(() => api.get<Kategori[]>('/kategori'), []);
   const keputusan = useApi(() => api.get<Keputusan[]>('/keputusan'), [nonce]);
 
   const q = new URLSearchParams();
@@ -261,11 +335,14 @@ export default function Transaksi() {
   if (status) q.set('status', status);
   if (jenis) q.set('jenis', jenis);
   if (rekening) q.set('rekening', rekening);
+  if (kategoriF) q.set('kategori', kategoriF);
+  if (dari) q.set('dari', dari);
+  if (sampai) q.set('sampai', sampai);
   q.set('batas', '100');
 
   const daftar = useApi(
     () => api.get<{ total: number; daftar: Tx[] }>(`/transaksi?${q.toString()}`),
-    [cari, status, jenis, rekening, nonce],
+    [cari, status, jenis, rekening, kategoriF, dari, sampai, nonce],
   );
 
   const jawab = async (id: number, optionId: string) => {
@@ -275,8 +352,13 @@ export default function Transaksi() {
 
   return (
     <>
-      <h1>Transaksi</h1>
-      <p className="subjudul">Cari dan filter semua transaksi. Setiap transaksi membuka bukti dan riwayat koreksinya.</p>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <div>
+          <h1>Transaksi</h1>
+          <p className="subjudul">Cari dan filter semua transaksi. Setiap transaksi membuka bukti dan riwayat koreksinya.</p>
+        </div>
+        <button className="tombol tombol-utama" onClick={() => bukaCatat()}>＋ Catat transaksi</button>
+      </div>
 
       {(keputusan.data ?? []).length > 0 && (
         <Kartu judul="Pertanyaan yang perlu dijawab">
@@ -301,9 +383,11 @@ export default function Transaksi() {
       )}
 
       <Kartu>
+        <details open={window.innerWidth >= 900}>
+        <summary style={{ fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}>Cari &amp; saring</summary>
         <div className="bidang">
           <label htmlFor="cari">Cari merchant, catatan, nomor referensi</label>
-          <input id="cari" value={cari} onChange={(e) => setCari(e.target.value)} placeholder="mis. biznet" />
+          <input id="cari" value={cari} onChange={(e) => setCari(e.target.value)} placeholder="mis. kantin" />
         </div>
         <div className="bidang-baris bidang-baris-2">
           <div className="bidang">
@@ -338,6 +422,22 @@ export default function Transaksi() {
             ))}
           </select>
         </div>
+        <div className="bidang-baris bidang-baris-2">
+          <div className="bidang">
+            <label htmlFor="f-kat">Kategori</label>
+            <select id="f-kat" value={kategoriF} onChange={(e) => setKategoriF(e.target.value)}>
+              <option value="">Semua kategori</option>
+              {(kategoriData.data ?? []).map((k) => (
+                <option key={k.id} value={k.id}>{k.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="bidang-baris bidang-baris-2" style={{ margin: 0 }}>
+            <div className="bidang"><label htmlFor="f-dari">Dari</label><input id="f-dari" type="date" value={dari} onChange={(e) => setDari(e.target.value)} /></div>
+            <div className="bidang"><label htmlFor="f-sampai">Sampai</label><input id="f-sampai" type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} /></div>
+          </div>
+        </div>
+        </details>
       </Kartu>
 
       {pilih !== null && (
@@ -365,6 +465,7 @@ export default function Transaksi() {
                     <tr>
                       <th>Tanggal</th>
                       <th>Keterangan</th>
+                      <th>Kategori</th>
                       <th>Rekening</th>
                       <th>Jenis</th>
                       <th>Status</th>
@@ -380,7 +481,7 @@ export default function Transaksi() {
                           <span className="kecil"> {jam(t.occurred_at)}</span>
                         </td>
                         <td data-l="Keterangan">
-                          {t.merchant_raw ?? t.counterparty ?? '—'}
+                          {t.merchant_nama ?? t.merchant_raw ?? t.counterparty ?? '—'}
                           {t.layanan && <span className="chip" style={{ marginLeft: 6 }}>{t.layanan}</span>}
                           {t.jumlah_bukti > 0 && (
                             <span className="chip" style={{ marginLeft: 6 }}>
@@ -388,6 +489,7 @@ export default function Transaksi() {
                             </span>
                           )}
                         </td>
+                        <td data-l="Kategori">{t.kategori ?? <span className="chip chip-verifikasi">belum ada</span>}</td>
                         <td data-l="Rekening">{t.rekening ?? '—'}</td>
                         <td data-l="Jenis">{LABEL_JENIS[t.kind] ?? t.kind}</td>
                         <td data-l="Status">
