@@ -63,21 +63,32 @@ const rp = (n: number) => esc(formatIDR(n));
 
 type Kat = { id: number; name: string; icon: string | null };
 
-/** Kategori paling sering dipakai 90 hari terakhir (induk saja), lalu urutan bawaan. */
+/** Urutan pilihan bawaan untuk kategori yang belum pernah dipakai: yang paling umum lebih dulu. */
+const URUTAN_UMUM = ['makan', 'transport', 'groceries', 'belanja-barang', 'langganan-lain', 'langganan-ai', 'hiburan', 'pendidikan', 'kesehatan', 'kebutuhan-harian', 'hadiah'];
+
+/**
+ * Kategori untuk tombol cepat: yang paling sering dipakai 90 hari terakhir lebih dulu (termasuk kategori
+ * buatan sendiri), lalu urutan umum (Makan, Transport, Belanja, ...), lalu urutan bawaan.
+ */
 export function kategoriPopuler(batas: number, database: DB = db()): Kat[] {
   const sejak = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
-  return database
+  const rows = database
     .prepare(
-      `SELECT c.id, c.name, c.icon,
+      `SELECT c.id, c.name, c.icon, c.slug,
               (SELECT COUNT(*) FROM cash_event ce
                 WHERE ce.category_id = c.id AND ce.status <> 'dibatalkan' AND date(ce.occurred_at) >= ?) AS n
          FROM category c
-        WHERE c.active = 1 AND c.parent_id IS NULL
-          AND c.slug NOT IN ('lainnya','tabungan')
-        ORDER BY n DESC, c.sort_order, c.name
-        LIMIT ?`,
+        WHERE c.active = 1 AND c.parent_id IS NULL AND c.slug NOT IN ('lainnya','tabungan')`,
     )
-    .all(sejak, batas) as Kat[];
+    .all(sejak) as Array<Kat & { slug: string; n: number }>;
+  const peringkat = (slug: string) => {
+    const i = URUTAN_UMUM.indexOf(slug);
+    return i === -1 ? 999 : i;
+  };
+  return rows
+    .sort((a, b) => b.n - a.n || peringkat(a.slug) - peringkat(b.slug) || a.name.localeCompare(b.name))
+    .slice(0, batas)
+    .map(({ id, name, icon }) => ({ id, name, icon }));
 }
 
 export function semuaKategoriAktif(database: DB = db()): Kat[] {

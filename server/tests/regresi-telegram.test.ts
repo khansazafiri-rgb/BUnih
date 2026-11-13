@@ -173,3 +173,37 @@ describe('menu perintah Telegram', () => {
     expect(DAFTAR_PERINTAH.every((p) => p.description.length > 3 && p.description.length <= 256)).toBe(true);
   });
 });
+
+describe('tombol kategori cepat dan rencana sampai tanggal menipis', () => {
+  it('tanpa riwayat, pilihan cepat dimulai dari kategori yang paling umum', async () => {
+    const { kategoriPopuler } = await import('../src/telegram/ui/transaksiUi.js');
+    const nama = kategoriPopuler(6, database).map((k) => k.name);
+    expect(nama[0]).toBe('Makan');
+    expect(nama).toContain('Transport');
+  });
+
+  it('kategori buatan sendiri yang sering dipakai naik ke tombol cepat', async () => {
+    const { kategoriPopuler } = await import('../src/telegram/ui/transaksiUi.js');
+    const { buatTransaksi } = await import('../src/domain/manualTx.js');
+    const id = buatAtauPakaiKategori('Pacaran', 'uji', {}, database).id;
+    for (let i = 0; i < 3; i += 1) {
+      buatTransaksi({ jenis: 'pengeluaran', jumlah_minor: 10_000 + i, rekening_id: akun(database, 'Mandiri'), kategori_id: id, merchant: `T${i}` }, 'uji', database);
+    }
+    expect(kategoriPopuler(6, database)[0]!.name).toBe('Pacaran');
+  });
+
+  it('aman 7 hari tetapi menipis kemudian: judul dan isi sejalan, dengan batas belanja harian sampai tanggal itu', async () => {
+    const { pasangSaldo } = await import('./bantu.js');
+    const { rencanaUang, teksRencanaUang } = await import('../src/domain/rencanaUang.js');
+    const { formatTanggalSingkat } = await import('../src/domain/time.js');
+    pasangSaldo(database, 'Mandiri', 1_500_000, -1);
+    const menipis = addDays(today(), 20);
+    const r = rencanaUang(database, today(), menipis);
+    expect(r.status).not.toBe('kurang');
+    expect(r.sampai_menipis?.hari_lagi).toBe(20);
+    const teks = teksRencanaUang(r, (s) => s, formatTanggalSingkat);
+    expect(teks).toContain('Menjelang');
+    expect(teks).toMatch(/batasi belanja di luar tagihan|siapkan pemasukan/);
+    expect(teks).not.toMatch(/kekurangan/i);
+  });
+});

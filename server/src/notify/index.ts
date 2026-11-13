@@ -114,17 +114,26 @@ export function kumpulkanPengingat(
       const putusan = putuskanKirimDefisit(kondisi, terakhir);
       if (putusan.kirim) {
         const kepastian = terverifikasi ? 'Terverifikasi (saldo sudah dikonfirmasi)' : 'Perkiraan — saldo belum diverifikasi';
-        const urgensi = !terverifikasi ? 'Rendah' : defisit ? 'Tinggi' : 'Sedang';
-        // Bukan "kekurangan Rp2 juta" (angka besar yang membingungkan), melainkan rencana 7 hari yang bisa langsung dijalankan.
-        const rencana = teksRencanaUang(rencanaUang(database, hariIni), esc, formatTanggalSingkat);
+        // Bukan "kekurangan Rp2 juta" (angka besar yang membingungkan), melainkan rencana yang bisa langsung dijalankan.
+        const tanggalMenipis = defisit ?? p.ringkasan.saldo_terendah_tanggal;
+        const r = rencanaUang(database, hariIni, tanggalMenipis);
+        const rencana = teksRencanaUang(r, esc, formatTanggalSingkat);
+        const urgensi = !terverifikasi ? 'Rendah' : r.status === 'kurang' ? 'Tinggi' : 'Sedang';
+        // Judul harus sejalan dengan isi rencana: "kurang" hanya bila 7 hari ke depan memang tidak tertutup.
+        const judul =
+          r.status === 'kurang'
+            ? '🔴 <b>Uang untuk 7 hari ke depan belum cukup</b>'
+            : defisit
+              ? '🟡 <b>Aman 7 hari ke depan, tetapi uangmu diperkirakan menipis setelahnya</b>'
+              : '🟡 <b>Saldo mendekati batas aman</b>';
         out.push({
           type: 'saldo_di_bawah_cadangan',
           // Kunci memuat hari + urutan kiriman hari itu, BUKAN angka saldo: satu angka yang berubah tidak membuat peringatan baru.
           dedupe_key: `defisit:${hariIni}:${(terakhir && terakhir.hari === hariIni ? terakhir.jumlahHariIni : 0) + 1}`,
           text: terverifikasi
-            ? `${defisit ? '🔴 <b>Uangmu diperkirakan menipis</b>' : '🟡 <b>Saldo mendekati batas aman</b>'}\n\n${rencana}\n\nUrgensi: ${urgensi} · Kepastian: ${kepastian}`
+            ? `${judul}\n\n${rencana}\n\nUrgensi: ${urgensi} · Kepastian: ${kepastian}`
             : `🟡 <b>Perkiraan — saldo belum diverifikasi</b>\nIni <i>bukan kondisi keuangan aktual</i>: saldo dasar masih asumsi awal atau belum dikonfirmasi. Konfirmasi saldo rekeningmu agar rencana di bawah akurat.\n\n${rencana}\n\nUrgensi: ${urgensi} · Kepastian: ${kepastian}`,
-          prioritas: terverifikasi && defisit ? 1 : terverifikasi ? 2 : 3,
+          prioritas: terverifikasi && r.status === 'kurang' ? 1 : terverifikasi ? 2 : 3,
           kondisiDefisit: kondisi,
           tombol: [
             ...(terverifikasi ? [] : [[{ t: '💳 Konfirmasi Saldo', d: 'r:l' } as Tombol]]),
@@ -358,6 +367,6 @@ export function penyebabDefisit(database: DB = db()): string {
   }
   const risiko = p.risiko.slice(0, 3).map((r) => `• ${esc(r.pesan)}`);
   if (risiko.length) baris.push('', '<b>Yang belum pasti</b>', ...risiko);
-  baris.push('', teksRencanaUang(rencanaUang(database, hariIni), esc, formatTanggalSingkat));
+  baris.push('', teksRencanaUang(rencanaUang(database, hariIni, p.ringkasan.tanggal_defisit ?? null), esc, formatTanggalSingkat));
   return baris.join('\n');
 }

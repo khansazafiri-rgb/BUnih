@@ -44,11 +44,22 @@ export type RencanaUang = {
   perlu_masuk_sebelum: IsoDate | null;
   /** Kalimat rencana yang siap tampil. */
   rencana: string;
+  /**
+   * Bila proyeksi menunjukkan uang menipis setelah 7 hari: berapa batas belanja harian di luar tagihan
+   * supaya tetap aman sampai tanggal itu. null bila tidak ada tanggal menipis atau saldo belum diketahui.
+   */
+  sampai_menipis: {
+    tanggal: IsoDate;
+    hari_lagi: number;
+    tagihan_minor: number;
+    batas_harian_minor: number;
+    perlu_masuk_minor: number;
+  } | null;
 };
 
 const HARI = 7;
 
-export function rencanaUang(database: DB = db(), hariIni: IsoDate = today()): RencanaUang {
+export function rencanaUang(database: DB = db(), hariIni: IsoDate = today(), tanggalMenipis: IsoDate | null = null): RencanaUang {
   const t = tagihanMendekat({ hari: 14, asOf: hariIni }, database);
   const dihitung = t.daftar.filter((d) => d.aktif_di_skenario && d.memotong_saldo_saya && d.nominal_minor !== null);
   const dalamTujuh = dihitung.filter((d) => d.tanggal <= addDays(hariIni, HARI));
@@ -94,6 +105,24 @@ export function rencanaUang(database: DB = db(), hariIni: IsoDate = today()): Re
     if (!sebelum) sebelum = addDays(hariIni, HARI);
   }
 
+  // Rencana sampai tanggal uang diperkirakan menipis (bila lewat 7 hari): berapa batas harian agar aman.
+  let sampaiMenipis: RencanaUang['sampai_menipis'] = null;
+  if (saldo !== null && tanggalMenipis && tanggalMenipis > hariIni) {
+    const hariLagi = Math.max(1, Math.round((Date.parse(`${tanggalMenipis}T00:00:00Z`) - Date.parse(`${hariIni}T00:00:00Z`)) / 86_400_000));
+    const panjang = tagihanMendekat({ hari: Math.min(60, hariLagi), asOf: hariIni }, database);
+    const tagihanSampai = panjang.daftar
+      .filter((d) => d.aktif_di_skenario && d.memotong_saldo_saya && d.nominal_minor !== null && d.tanggal <= tanggalMenipis)
+      .reduce((s2, d) => s2 + (d.nominal_minor ?? 0), 0);
+    const bebas = saldo - tagihanSampai - cadangan;
+    sampaiMenipis = {
+      tanggal: tanggalMenipis,
+      hari_lagi: hariLagi,
+      tagihan_minor: tagihanSampai,
+      batas_harian_minor: Math.max(0, Math.floor(bebas / hariLagi / 1000) * 1000),
+      perlu_masuk_minor: Math.max(0, -bebas),
+    };
+  }
+
   const rp = (n: number) => `Rp${Math.round(n).toLocaleString('id-ID')}`;
   let rencana: string;
   if (saldo === null) {
@@ -133,6 +162,7 @@ export function rencanaUang(database: DB = db(), hariIni: IsoDate = today()): Re
     perlu_masuk_minor: perluMasuk,
     perlu_masuk_sebelum: sebelum,
     rencana,
+    sampai_menipis: sampaiMenipis,
   };
 }
 
@@ -157,5 +187,19 @@ export function teksRencanaUang(r: RencanaUang, esc: (s: string) => string, tang
   );
   baris.push('');
   baris.push(`🗒️ <b>Rencana:</b> ${esc(r.rencana)}`);
+  if (r.sampai_menipis) {
+    const m = r.sampai_menipis;
+    baris.push('');
+    baris.push(`📆 <b>Menjelang ${esc(tanggalSingkat(m.tanggal))} (${m.hari_lagi} hari lagi) uangmu diperkirakan menipis.</b>`);
+    // Bila 7 hari ke depan saja sudah kurang, jangan menumpuk dua angka batas harian yang berbeda:
+    // rencana di atas sudah menjadi yang berlaku.
+    if (r.status !== 'kurang') {
+      baris.push(
+        m.perlu_masuk_minor > 0
+          ? `   Supaya tetap aman sampai tanggal itu, siapkan pemasukan ${rp(m.perlu_masuk_minor)} atau tunda pengeluaran yang bisa ditunda. Tagihan sampai saat itu ${rp(m.tagihan_minor)}.`
+          : `   Supaya tetap aman sampai tanggal itu, batasi belanja di luar tagihan sekitar ${rp(m.batas_harian_minor)} per hari (tagihan sampai saat itu ${rp(m.tagihan_minor)}).`,
+      );
+    }
+  }
   return baris.join('\n');
 }
