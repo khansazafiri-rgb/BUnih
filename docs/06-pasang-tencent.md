@@ -265,7 +265,7 @@ nyata. Pindah ke Pub/Sub bisa dilakukan belakangan tanpa mengubah model data.
 
 **Syarat sebelum langkah ini:** hasil audit memastikan nginx **di host** sudah
 menangani port 80/443 atau dapat dipasang tanpa berbenturan dengan Hermes.
-Periksa dulu dengan `ss -tlnp | grep -E ':(80|443)\\b'` dan daftar proses/kontainer
+Periksa dulu dengan `ss -tlnp | grep -E ':(80|443)([[:space:]]|$)'` dan daftar proses/kontainer
 dari audit. **Jangan memasang nginx baru** bila Hermes memakai Caddy, Traefik,
 nginx di Docker, atau proxy lain yang sudah mengikat port tersebut. Untuk
 kasus itu, tambahkan *virtual host/upstream* baru di proxy **yang sama**,
@@ -298,7 +298,7 @@ sudo cp deploy/nginx/bunih.conf /etc/nginx/conf.d/bunih.conf
 sudo sed -i "s/keuangan.contoh.id/$DOMAIN/g" /etc/nginx/conf.d/bunih.conf
 sudo nginx -t && sudo systemctl reload nginx
 
-curl -I "https://$DOMAIN/api/kesehatan"
+curl -fsS "https://$DOMAIN/api/kesehatan"
 ```
 
 **Penting:** jika `sudo nginx -t` gagal, **jangan reload**. Periksa
