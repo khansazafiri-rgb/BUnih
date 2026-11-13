@@ -80,10 +80,11 @@ if ada systemctl; then
     printf '%s\n' "${hermes_unit}" | sed 's/^/  /'
   fi
 fi
-hermes_proses="$(ps -eo pid,user,pcpu,pmem,etime,cmd --sort=-pmem 2>/dev/null | grep -i hermes | grep -v grep || true)"
+# Show executable NAME only, never process arguments: argv may contain API tokens.
+hermes_proses="$(ps -eo pid,user,pcpu,pmem,etime,comm --sort=-pmem 2>/dev/null | grep -i hermes | grep -v grep || true)"
 if [ -n "${hermes_proses}" ]; then
   ditemukan=1
-  printf 'Proses yang mengandung kata hermes:\n'
+  printf 'Proses dengan nama executable Hermes (tanpa argumen rahasia):\n'
   printf '%s\n' "${hermes_proses}" | sed 's/^/  /'
 fi
 if [ "${ditemukan}" -eq 0 ]; then

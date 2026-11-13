@@ -263,41 +263,65 @@ nyata. Pindah ke Pub/Sub bisa dilakukan belakangan tanpa mengubah model data.
 
 ## 6. Domain dan HTTPS
 
-Arahkan `keuangan.domainmu.id` ke IP server (A record), lalu:
+**Syarat sebelum langkah ini:** hasil audit memastikan nginx **di host** sudah
+menangani port 80/443 atau dapat dipasang tanpa berbenturan dengan Hermes.
+Periksa dulu dengan `ss -tlnp | grep -E ':(80|443)([[:space:]]|$)'` dan daftar proses/kontainer
+dari audit. **Jangan memasang nginx baru** bila Hermes memakai Caddy, Traefik,
+nginx di Docker, atau proxy lain yang sudah mengikat port tersebut. Untuk
+kasus itu, tambahkan *virtual host/upstream* baru di proxy **yang sama**,
+arahkannya ke `http://127.0.0.1:8787`, dan terbitkan HTTPS menggunakan
+mekanisme proxy tersebut. Jangan ubah konfigurasi Hermes.
+
+Jika nginx **di host** adalah proxy yang benar:
+
+1. Buat A record nama domainmu menuju IP publik server. Pastikan port 80 dan
+   443 bisa diakses di firewall host dan Tencent Cloud security group.
+2. Pasang Certbot bila belum ada. Pada server yang sudah memiliki nginx,
+   jangan lakukan instal ulang yang bisa memengaruhi layanan lain.
+3. **Bootstrap HTTP tanpa sertifikat** terlebih dahulu. Konfigurasi produksi
+   `deploy/nginx/bunih.conf` tidak boleh dipakai sebelum sertifikat tersedia.
 
 ```bash
-sudo apt update && sudo apt install -y nginx certbot python3-certbot-nginx
+# Di server, dari akar repo BUnih. Ganti domain contoh di kedua perintah sed.
+DOMAIN=keuangan.domainmu.id
+sudo apt-get install -y certbot
+sudo install -d -m 0755 /var/www/letsencrypt
+sudo cp deploy/nginx/bunih-bootstrap.conf /etc/nginx/conf.d/bunih.conf
+sudo sed -i "s/keuangan.contoh.id/$DOMAIN/g" /etc/nginx/conf.d/bunih.conf
+sudo nginx -t && sudo systemctl reload nginx
 
+# Minta sertifikat dengan challenge HTTP-01, tanpa Certbot mengubah conf Hermes.
+sudo certbot certonly --webroot -w /var/www/letsencrypt -d "$DOMAIN"
+
+# Sertifikat sudah ada: baru gunakan konfigurasi HTTPS produksi.
 sudo cp deploy/nginx/bunih.conf /etc/nginx/conf.d/bunih.conf
-sudo sed -i 's/keuangan.contoh.id/keuangan.domainmu.id/g' /etc/nginx/conf.d/bunih.conf
+sudo sed -i "s/keuangan.contoh.id/$DOMAIN/g" /etc/nginx/conf.d/bunih.conf
+sudo nginx -t && sudo systemctl reload nginx
 
-sudo nginx -t          # harus "syntax is ok"
-sudo systemctl reload nginx
-
-sudo certbot --nginx -d keuangan.domainmu.id
+curl -fsS "https://$DOMAIN/api/kesehatan"
 ```
 
-Buka port 80 dan 443 di dua tempat: firewall sistem **dan** grup keamanan Tencent Cloud.
+**Penting:** jika `sudo nginx -t` gagal, **jangan reload**. Periksa
+pesan galat dan kembalikan konfigurasi bootstrap di atas bila perlu;
+proses Hermes yang sudah berjalan tetap tidak diubah. Jangan menyalin
+berkas baru ke `/etc/nginx/conf.d/bunih.conf` bila jalur itu sudah
+digunakan layanan lain—periksa dahulu.
 
-```bash
-sudo ufw allow 80/tcp && sudo ufw allow 443/tcp   # bila memakai ufw
-```
+Bila nginx pada host belum ada dan port 80/443 benar-benar bebas,
+pasang terlebih dulu dengan `sudo apt-get install -y nginx` lalu ikuti
+langkah di atas. Bila memakai ufw, buka 80/443 **hanya setelah**
+konfirmasi tidak ada kebijakan Hermes yang bertentangan.
 
-**Kalau Hermes sudah memakai nginx yang sama**: berkas `bunih.conf` hanya menambah
-server block baru untuk domainmu. Jangan sentuh berkas milik Hermes. Jalankan
-`sudo nginx -t` sebelum reload; bila gagal, nginx tetap memakai konfigurasi lama
-sehingga Hermes tidak ikut mati.
-
-Kalau Hermes memakai port 80/443 lewat kontainernya sendiri, jangan pasang nginx
-tandingan — tambahkan BUnih sebagai *upstream* pada proxy yang sudah ada, atau
-jalankan BUnih di port lain dan proxy-kan dari sana.
-
-Setelah HTTPS hidup, pastikan `BUNIH_BASE_URL` dan `GOOGLE_REDIRECT_URI` di
-`deploy/.env` memakai `https://`, lalu:
+Setelah HTTPS hidup, ubah `BUNIH_BASE_URL` dan
+`GOOGLE_REDIRECT_URI` pada `deploy/.env` menjadi HTTPS sesuai domain,
+kemudian:
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d
 ```
+
+> Perubahan nilai `deploy/.env` dan sertifikat harus dilakukan di server saja.
+> Jangan mengunggahnya ke GitHub atau mengirimkannya ke chat.
 
 ---
 

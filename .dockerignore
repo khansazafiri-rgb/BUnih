@@ -1,0 +1,30 @@
+# Secrets must never enter the Docker build context (including intermediate layers).
+.env
+.env.*
+deploy/.env
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*credentials*.json
+**/*token*.json
+
+# Git metadata, dependencies, builds, tests, and local data
+.git
+**/node_modules
+**/dist
+**/coverage
+**/.ci-data
+**/.vitest-data
+**/*.tsbuildinfo
+**/*.sqlite
+**/*.sqlite-*
+data
+backups
+tmp
+audit-server.txt
+**/*.log
+.DS_Store
+
+# Note: the runtime secrets are loaded by Docker Compose env_file at STARTUP,
+# never by COPY in the Dockerfile.
