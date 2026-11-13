@@ -1,4 +1,7 @@
 # Secrets must never enter the Docker build context (including intermediate layers).
+.env
+.env.*
+deploy/.env
 **/.env
 **/.env.*
 **/*.pem
