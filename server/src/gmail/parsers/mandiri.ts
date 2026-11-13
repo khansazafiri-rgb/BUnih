@@ -72,9 +72,17 @@ export const mandiriParser: MailParser = {
 
     const adaKeluar = KELUAR.some((k) => hay.includes(k));
     const adaMasuk = MASUK.some((k) => hay.includes(k));
+    // Email penerimaan dana kadang bertajuk "Transfer Berhasil" meskipun
+    // rekening kita DIKREDIT. Pernyataan eksplisit dana masuk harus menang
+    // atas judul generik; jangan salah mencatat top-up sebagai pengeluaran.
+    const kreditEksplisit = /dana masuk|uang masuk|transfer masuk|dana diterima|penerimaan dana|rekening dikredit|saldo bertambah|anda menerima|transfer diterima/.test(hay);
+    const debitEksplisit = /rekening didebet|rekening didebit|dana keluar|uang keluar|pembayaran berhasil|pembelian berhasil|qris|tarik tunai/.test(hay);
     let direction: 'masuk' | 'keluar';
     let keyakinanArah: number;
-    if (adaKeluar && !adaMasuk) {
+    if (kreditEksplisit && !debitEksplisit) {
+      direction = 'masuk';
+      keyakinanArah = 0.95;
+    } else if (adaKeluar && !adaMasuk) {
       direction = 'keluar';
       keyakinanArah = 0.95;
     } else if (adaMasuk && !adaKeluar) {
