@@ -1,7 +1,9 @@
 import type { Database as DB } from 'better-sqlite3';
 import { db } from '../db/index.js';
 import { formatIDR } from '../domain/money.js';
-import { addDays, formatTanggal, formatTanggalSingkat, nowIso, today } from '../domain/time.js';
+import { addDays, formatTanggal, formatTanggalSingkat, nowIso, startOfWeek, today } from '../domain/time.js';
+import { listBudgets } from '../domain/budgets.js';
+import { listGoals } from '../domain/goals.js';
 import { project } from '../domain/projection.js';
 import { tagihanMendekat, cancelledButCharged } from '../domain/services.js';
 import { listReceivables } from '../domain/receivables.js';
@@ -191,6 +193,38 @@ export function kumpulkanPengingat(
           `📭 Sinkronisasi Gmail gagal: ${esc(s.error_terakhir)}. ` +
           'Data transaksi mungkin belum lengkap.',
         prioritas: 2,
+      });
+    }
+  }
+
+  // 7b. Anggaran yang berisiko atau terlewati. Satu pengingat per anggaran, per periode, per tingkat.
+  if (aktif(map, 'anggaran_berisiko', mode)) {
+    for (const b of listBudgets({ asOf: hariIni }, database)) {
+      if (b.status !== 'berisiko' && b.status !== 'lewat') continue;
+      out.push({
+        type: 'anggaran_berisiko',
+        dedupe_key: `anggaran:${b.id}:${b.jendela.dari}:${b.status}`,
+        text:
+          b.status === 'lewat'
+            ? `⛔ Anggaran <b>${esc(b.nama)}</b> sudah terlewati: terpakai ${formatIDR(b.terpakai_minor)} dari ${formatIDR(b.nominal_periode_minor + b.carry_minor)}.`
+            : `⚠️ Anggaran <b>${esc(b.nama)}</b> bisa terlewati kalau lajunya begini` +
+              (b.perkiraan_akhir_minor !== null ? ` (perkiraan akhir periode ${formatIDR(b.perkiraan_akhir_minor)}, ini estimasi)` : '') +
+              `. Sisa ${formatIDR(Math.max(0, b.sisa_minor))}.`,
+        prioritas: b.status === 'lewat' ? 2 : 3,
+      });
+    }
+  }
+
+  // 7c. Tujuan yang berisiko tidak tercapai tepat waktu (hanya yang pengingatnya dinyalakan).
+  if (aktif(map, 'tujuan_berisiko', mode)) {
+    for (const g of listGoals({ asOf: hariIni }, database)) {
+      if (!g.pengingat || g.status !== 'aktif') continue;
+      if (g.risiko !== 'berisiko' && g.risiko !== 'terlambat') continue;
+      out.push({
+        type: 'tujuan_berisiko',
+        dedupe_key: `tujuan:${g.id}:${g.risiko}:${startOfWeek(hariIni)}`,
+        text: `🎯 Tujuan <b>${esc(g.nama)}</b>: ${esc(g.penjelasan)}`,
+        prioritas: 4,
       });
     }
   }

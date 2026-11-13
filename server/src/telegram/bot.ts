@@ -14,6 +14,11 @@ import { listDecisions, markSent, type DecisionRow } from '../domain/decisions.j
 import { setTopupStatus } from '../domain/topup.js';
 import { detectIntent, parseRupiah } from './nlu.js';
 import {
+  adalahPermintaanBuatTujuan, adalahPertanyaanPengeluaran, adalahPertanyaanTujuan, jawabDariTombol,
+  jawabPertanyaanPengeluaran, parseTujuan, pertanyaanTujuan, ringkasanTujuan, simpanTujuan,
+  uraiMerchantProyek, type DraftTujuan, type Jawaban,
+} from './analitikBot.js';
+import {
   bandingSkenario, bantuan, daftarTagihan, esc, hasilSimulasi, ringkasan5Hari, ringkasanAnggaran,
   ringkasanBulan, ringkasanHari, ringkasanMinggu, ringkasanReimburse, ringkasanTabungan,
 } from './format.js';
@@ -22,7 +27,8 @@ type Percakapan =
   | { tipe: 'input_bagi_biaya'; cash_event_id: number; nominal_minor: number }
   | { tipe: 'input_nominal'; topup_plan_id: number }
   | { tipe: 'input_belanja' }
-  | { tipe: 'konfirmasi_foto'; evidence_id: number };
+  | { tipe: 'konfirmasi_foto'; evidence_id: number }
+  | { tipe: 'input_tujuan'; draft: DraftTujuan };
 
 const percakapan = new Map<string, Percakapan>();
 let bot: Bot | null = null;
@@ -138,6 +144,7 @@ function catatPengeluaranCepat(
   label: string,
   tanggalRelatif: 'hari_ini' | 'kemarin' | null,
   database: DB,
+  tambahan: { merchant?: string | null; proyek?: string | null } = {},
 ): { id: number; pesan: string } {
   const akun = database
     .prepare(`SELECT id, name FROM account WHERE is_mine = 1 AND is_savings_target = 0 ORDER BY id LIMIT 1`)
@@ -157,7 +164,8 @@ function catatPengeluaranCepat(
       account_id: akun?.id ?? null,
       is_cash: !akun,
       kind: 'pengeluaran_pribadi',
-      merchant_raw: label || null,
+      merchant_raw: tambahan.merchant || label || null,
+      project: tambahan.proyek ?? null,
       category_id: kategori?.id ?? null,
       source: 'telegram',
       note: 'Dicatat manual lewat Telegram.',
@@ -168,9 +176,34 @@ function catatPengeluaranCepat(
   return {
     id: res.id,
     pesan:
-      `Dicatat: ${formatIDR(nominal)}${label ? ` — ${label}` : ''} pada ${formatTanggalSingkat(tanggal)}` +
+      `Dicatat: ${formatIDR(nominal)}${tambahan.merchant || label ? ` — ${tambahan.merchant || label}` : ''}${tambahan.proyek ? ` #${tambahan.proyek}` : ''} pada ${formatTanggalSingkat(tanggal)}` +
       `${akun ? ` dari ${akun.name}` : ' (tunai)'}.`,
   };
+}
+
+async function kirimJawaban(ctx: Context, j: Jawaban): Promise<void> {
+  if (j.pilihan && j.pilihan.length > 0) {
+    const kb = new InlineKeyboard();
+    j.pilihan.forEach((p, i) => {
+      kb.text(p.label, p.data);
+      if (i % 2 === 1) kb.row();
+    });
+    await ctx.reply(j.teks, { parse_mode: 'HTML', reply_markup: kb });
+    return;
+  }
+  await ctx.reply(j.teks, { parse_mode: 'HTML' });
+}
+
+/** Balasan untuk draft tujuan: simpan bila lengkap, atau tanya bagian yang kurang. */
+async function lanjutkanTujuan(ctx: Context, draft: DraftTujuan, database: DB): Promise<void> {
+  const tanya = pertanyaanTujuan(draft);
+  if (tanya) {
+    percakapan.set(String(ctx.chat?.id), { tipe: 'input_tujuan', draft });
+    await ctx.reply(tanya);
+    return;
+  }
+  const hasil = simpanTujuan(draft, database);
+  await ctx.reply(hasil.pesan, { parse_mode: 'HTML' });
 }
 
 export function createBot(): Bot | null {
@@ -210,6 +243,7 @@ export function createBot(): Bot | null {
   b.command('anggaran', (ctx) => ctx.reply(ringkasanAnggaran(db()), { parse_mode: 'HTML' }));
   b.command('tabungan', (ctx) => ctx.reply(ringkasanTabungan(db()), { parse_mode: 'HTML' }));
   b.command('reimburse', (ctx) => ctx.reply(ringkasanReimburse(db()), { parse_mode: 'HTML' }));
+  b.command('tujuan', (ctx) => ctx.reply(ringkasanTujuan(db()), { parse_mode: 'HTML' }));
   b.command('skenario', (ctx) => ctx.reply(bandingSkenario(db()), { parse_mode: 'HTML' }));
 
   b.command('belanja', async (ctx) => {
@@ -280,6 +314,12 @@ export function createBot(): Bot | null {
         const hasil = applyDecision(Number(idRaw), optId ?? '', {}, 'telegram', database);
         await ctx.answerCallbackQuery({ text: hasil.ok ? 'Oke' : 'Gagal' });
         await balasLanjutan(ctx, hasil.pesan, hasil.lanjutan, database);
+        return;
+      }
+      if (data.startsWith('an:')) {
+        const j = jawabDariTombol(data, database);
+        await ctx.answerCallbackQuery();
+        await kirimJawaban(ctx, j ?? { teks: 'Pilihan itu sudah tidak berlaku.' });
         return;
       }
       if (data.startsWith('cat:')) {
@@ -443,6 +483,16 @@ export function createBot(): Bot | null {
           await ctx.reply(`Ditandai masuk ${formatIDR(nominal)}. Proyeksi sudah dihitung ulang.`);
           return;
         }
+        if (state.tipe === 'input_tujuan') {
+          const baru = parseTujuan(teks);
+          const draft: DraftTujuan = {
+            nama: state.draft.nama ?? baru.nama ?? (baru.target_minor ? null : teks.slice(0, 60)),
+            target_minor: state.draft.target_minor ?? baru.target_minor,
+            target_date: state.draft.target_date ?? baru.target_date,
+          };
+          await lanjutkanTujuan(ctx, draft, database);
+          return;
+        }
         if (state.tipe === 'input_belanja') {
           await tanganiBelanja(ctx, teks);
           return;
@@ -485,6 +535,18 @@ export function createBot(): Bot | null {
 
     const nlu = detectIntent(teks);
     try {
+      if (adalahPermintaanBuatTujuan(teks)) {
+        await lanjutkanTujuan(ctx, parseTujuan(teks), database);
+        return;
+      }
+      if (adalahPertanyaanTujuan(teks)) {
+        await ctx.reply(ringkasanTujuan(database), { parse_mode: 'HTML' });
+        return;
+      }
+      if ((nlu.intent === 'tidak_jelas' || nlu.intent === 'tanya_hari') && adalahPertanyaanPengeluaran(teks)) {
+        await kirimJawaban(ctx, jawabPertanyaanPengeluaran(teks, database));
+        return;
+      }
       switch (nlu.intent) {
         case 'bantuan':
           await ctx.reply(bantuan(), { parse_mode: 'HTML' });
@@ -643,12 +705,14 @@ export function createBot(): Bot | null {
         }
         case 'catat_pengeluaran': {
           if (!nlu.nominal_minor) break;
+          const urai = uraiMerchantProyek(nlu.teks);
           const hasil = catatPengeluaranCepat(
             nlu.nominal_minor,
             nlu.kategori_tebakan,
             nlu.teks.slice(0, 80),
             nlu.tanggal_relatif,
             database,
+            { merchant: urai.merchant, proyek: urai.proyek },
           );
           const kb = new InlineKeyboard()
             .text('Benar', `x:${hasil.id}:none`)
