@@ -30,7 +30,8 @@ export function layarMenuUtama(database: DB = db()): Layar {
   return {
     teks: `🏠 <b>BUnih — Menu Utama</b>\nKelola uangmu langsung dari sini.${belum > 0 ? `\n\n📂 ${belum} transaksi belum dikategorikan.` : ''}`,
     tombol: [
-      [tombolData('➕ Catat', 'c:menu'), tombolData('🧾 Transaksi', 't:o:0')],
+      [tombolData('➕ Catat', 'c:menu'), tombolData('💰 Top-up Masuk', 'm:topup')],
+      [tombolData('🧾 Transaksi', 't:o:0')],
       [tombolData('📂 Kategori', 'k:l:0'), tombolData('🎯 Anggaran', 'a:l')],
       [tombolData('🐷 Target', 'g:l'), tombolData('📊 Laporan', 'l:menu')],
       [tombolData('🏦 Rekening', 'r:l'), tombolData('🔔 Tagihan', 'b:l')],
@@ -51,6 +52,7 @@ export function layarRencana(database: DB = db()): Layar {
 export const DAFTAR_PERINTAH: Array<{ command: string; description: string }> = [
   { command: 'menu', description: 'Buka menu utama' },
   { command: 'catat', description: 'Catat transaksi baru' },
+  { command: 'topup', description: 'Catat top-up atau uang saku yang sudah diterima' },
   { command: 'transaksi', description: 'Lihat dan ubah transaksi' },
   { command: 'kategori', description: 'Pilih atau kelola kategori' },
   { command: 'anggaran', description: 'Lihat dan atur anggaran' },
@@ -73,6 +75,7 @@ export function layarBantuan(): Layar {
       '',
       '<b>Atau tulis biasa</b>',
       '• <i>makan 35rb di kantin pakai Mandiri</i> → usulan catatan, kamu konfirmasi',
+      '• <i>/topup 200rb</i> → catat uang masuk dengan pilihan rekening dan cek duplikat',
       '• <i>Buat anggaran Pacaran Rp500 ribu per bulan</i>',
       '• <i>Target laptop Rp8 juta sebelum Juni 2027</i>',
       '• <i>berapa pengeluaran makan bulan ini?</i> · <i>paling banyak habis buat apa?</i>',
