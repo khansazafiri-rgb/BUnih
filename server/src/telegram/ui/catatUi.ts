@@ -18,6 +18,7 @@ import { buatTransaksi, TransaksiError, type TransaksiBaru } from '../../domain/
 import { formatIDR } from '../../domain/money.js';
 import { rebuildObligations } from '../../domain/obligations.js';
 import { tandaiTopupDiterima } from '../../domain/topup.js';
+import { getCashEvent } from '../../domain/ledger.js';
 import { addDays, formatTanggal, today } from '../../domain/time.js';
 import { esc } from '../format.js';
 import { cariKategori, uraiMerchantProyek } from '../analitikBot.js';
@@ -318,6 +319,25 @@ export function tanganiCatat(parts: string[], ctx: Konteks, database: DB = db())
 
   try {
     switch (aksi) {
+      case 'link': {
+        if (!d.topup || !d.nominal || !d.rekeningId) return { toast: 'Hanya untuk top-up yang sedang dicatat.' };
+        const ev = getCashEvent(Number(arg), database);
+        if (!ev || ev.direction !== 'masuk' || ev.account_id !== d.rekeningId ||
+            ev.amount_minor !== d.nominal || ev.status === 'dibatalkan' ||
+            ev.occurred_at.slice(0, 10) !== (d.tanggal ?? today())) {
+          return { toast: 'Transaksi yang cocok tidak ditemukan. Periksa daftar transaksi.' };
+        }
+        const hasil = tandaiTopupDiterima(ev.id, 'telegram', database);
+        hapusDraft(ctx, database);
+        try { rebuildObligations({}, database); } catch { /* scheduler mencoba lagi */ }
+        return {
+          toast: 'Top-up dihubungkan tanpa duplikat',
+          layar: {
+            teks: `✅ <b>Top-up sudah ada (#${ev.id})</b>\n${esc(hasil.pesan)}\nTidak membuat transaksi baru.`,
+            tombol: [[tombolData('📄 Lihat transaksi', `t:v:${ev.id}`)], [MENU_UTAMA]],
+          },
+        };
+      }
       case 'a':
         if (arg === 'tunai') { d.tunai = true; d.rekeningId = null; d.belumJelas = false; }
         else if (arg === 'x') { d.belumJelas = true; d.rekeningId = null; d.tunai = false; }
@@ -389,7 +409,7 @@ function simpan(d: DraftCatat, ctx: Konteks, database: DB): Hasil {
         layar: {
           teks: `⚠️ Sudah ada uang masuk ${esc(formatIDR(d.nominal))} di rekening dan tanggal yang sama (transaksi #${kandidat.id}).\nApakah ini top-up yang sama? Jangan catat dua kali.`,
           tombol: [
-            [tombolData('✅ Gunakan transaksi ini', `t:j:${kandidat.id}:topup`)],
+            [tombolData('✅ Gunakan transaksi ini', `c:link:${kandidat.id}`)],
             [tombolData('➕ Top-up lain, tetap simpan', 'c:ok')],
             [tombolBatal],
           ],
