@@ -8,7 +8,7 @@ import { ruteCallback, ruteCommand, ruteTeks } from './ui/router.js';
 import { keKeyboard, type Hasil, type Konteks, type Layar } from './ui/layar.js';
 import { tandaiCallback } from './state.js';
 
-export const NAMA_PERINTAH = ['start', 'mulai', 'menu', 'catat', 'transaksi', 'kategori', 'anggaran', 'target', 'tujuan', 'laporan', 'rekening', 'rencana', 'tagihan', 'pengaturan', 'bantuan', 'help', 'batal'];
+export const NAMA_PERINTAH = ['start', 'mulai', 'menu', 'catat', 'topup', 'transaksi', 'kategori', 'anggaran', 'target', 'tujuan', 'laporan', 'rekening', 'rencana', 'tagihan', 'pengaturan', 'bantuan', 'help', 'batal'];
 
 function tanpaTag(teks: string): string {
   return teks.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
