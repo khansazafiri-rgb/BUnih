@@ -1,0 +1,64 @@
+# ---------------------------------------------------------------------------
+# BUnih di Tencent Cloud, terpisah dari Hermes.
+#
+# Pemisahan yang disengaja:
+#   - jaringan Docker sendiri (bunih_net); Hermes tidak berada di dalamnya
+#   - volume data sendiri (bunih_data); tidak pernah di-mount ke kontainer lain
+#   - berkas .env sendiri dengan hak akses 600 milik pengguna layanan
+#   - port hanya terikat ke 127.0.0.1; akses luar lewat nginx + HTTPS
+#
+# Hermes TIDAK boleh diberi akses ke volume ini maupun ke berkas .env.
+# Pencadangan dijalankan dari host (systemd timer / cron), bukan dari kontainer,
+# supaya kredensial dan jadwalnya tetap di bawah kendali host.
+# ---------------------------------------------------------------------------
+name: bunih
+
+services:
+  bunih:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: bunih:latest
+    container_name: bunih
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      TZ: Asia/Jakarta
+      BUNIH_DATA_DIR: /data
+      BUNIH_HOST: 0.0.0.0
+      BUNIH_PORT: "8787"
+    volumes:
+      - bunih_data:/data
+    ports:
+      # Hanya localhost. nginx yang menghadap internet.
+      - "127.0.0.1:8787:8787"
+    networks:
+      - bunih_net
+    # Pembatasan sumber daya supaya tidak mengganggu Hermes di mesin yang sama.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/api/kesehatan"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  bunih_data:
+    name: bunih_data
+
+networks:
+  bunih_net:
+    name: bunih_net

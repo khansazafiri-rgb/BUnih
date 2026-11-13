@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  periksa:
+    name: Bangun dan uji
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Pasang dependensi
+        run: npm ci --no-audit --no-fund
+
+      - name: Periksa tipe
+        run: npm run typecheck
+
+      - name: Bangun
+        run: npm run build
+
+      - name: Uji
+        run: npm test
+
+      - name: Periksa sintaks skrip shell
+        run: bash -n deploy/scripts/*.sh
+
+      - name: Pastikan migrasi dan seed berjalan di database bersih
+        run: |
+          BUNIH_DATA_DIR=./.ci-data node server/dist/db/cli-migrate.js
+          BUNIH_DATA_DIR=./.ci-data node server/dist/scripts/contoh.js

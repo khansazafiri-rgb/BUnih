@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# Alternatif tanpa Docker: jalankan BUnih langsung dengan systemd.
+# Pasang di /etc/systemd/system/bunih.service
+#
+#   sudo useradd --system --home /opt/bunih --shell /usr/sbin/nologin bunih
+#   sudo install -d -o bunih -g bunih -m 0750 /opt/bunih /var/lib/bunih
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bunih
+# ---------------------------------------------------------------------------
+[Unit]
+Description=BUnih - pusat kendali keuangan pribadi
+Documentation=file:/opt/bunih/docs/06-pasang-tencent.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bunih
+Group=bunih
+WorkingDirectory=/opt/bunih
+Environment=NODE_ENV=production
+Environment=TZ=Asia/Jakarta
+EnvironmentFile=/opt/bunih/.env
+ExecStart=/usr/bin/node /opt/bunih/server/dist/index.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+# Pengerasan: proses ini tidak boleh menyentuh apa pun milik Hermes.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/var/lib/bunih
+UMask=0077
+
+# Batasi sumber daya agar tidak mengganggu layanan lain di mesin yang sama.
+MemoryMax=512M
+CPUQuota=75%
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bunih
+
+[Install]
+WantedBy=multi-user.target

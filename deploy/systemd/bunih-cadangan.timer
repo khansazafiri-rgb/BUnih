@@ -1,0 +1,9 @@
+[Unit]
+Description=Jalankan cadangan BUnih setiap hari pukul 02.00 WIB
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

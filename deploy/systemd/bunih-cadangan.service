@@ -1,0 +1,10 @@
+[Unit]
+Description=Cadangan harian database BUnih
+After=bunih.service
+
+[Service]
+Type=oneshot
+User=bunih
+Group=bunih
+ExecStart=/opt/bunih/deploy/scripts/cadangkan.sh
+UMask=0077
