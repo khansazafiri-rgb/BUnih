@@ -85,6 +85,9 @@ function tanganiMenu(parts: string[], ctx: Konteks, database: DB): Hasil {
       clearState(ctx.chatId, 'utama', database);
       hapusDraft(ctx, database);
       return { toast: 'Dibatalkan', ...layarMenu(database) };
+    case 'topup':
+      clearState(ctx.chatId, 'utama', database);
+      return mulaiTopup('', ctx, database);
     case 'help':
       return { layar: layarBantuan() };
     case 'belum':
