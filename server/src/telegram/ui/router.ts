@@ -25,7 +25,7 @@ import { layarKartu, tanganiKartu, tanganiNotif } from './transaksiUi.js';
 import { layarDaftarKategori, tanganiKategori, tanganiTeksGantiNama, tanganiTeksKategoriBaru, type StateKategoriBaru } from './kategoriUi.js';
 import { halamanHasil, mulaiTransaksi } from './cariUi.js';
 import {
-  getDraft, hapusDraft, layarMenuCatat, mulaiDariTeks, setelahKategoriBaru, tanganiCatat, tanganiTeksCatat,
+  getDraft, hapusDraft, layarMenuCatat, mulaiDariTeks, mulaiTopup, setelahKategoriBaru, tanganiCatat, tanganiTeksCatat,
 } from './catatUi.js';
 import {
   adalahPermintaanAnggaran, layarAnggaran, layarDaftarTarget, mulaiDraftAnggaran, mulaiDraftTarget,
@@ -129,6 +129,9 @@ export function ruteCommand(nama: string, argumen: string, ctx: Konteks, databas
       clearState(ctx.chatId, 'utama', database);
       hapusDraft(ctx, database);
       return { baru: true, layar: { teks: '❌ Dibatalkan. Tidak ada yang diubah.', tombol: [[MENU_UTAMA]] } };
+    case 'topup':
+      clearState(ctx.chatId, 'utama', database);
+      return mulaiTopup(argumen, ctx, database);
     case 'catat':
       hapusDraft(ctx, database);
       clearState(ctx.chatId, 'utama', database);
