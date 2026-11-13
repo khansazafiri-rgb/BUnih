@@ -17,11 +17,12 @@ import {
   jadikanCompanyLangsung, jadikanHadiah, jadikanReimburseCompany, jadikanTalangan, jadikanTransferSendiri,
 } from './applyDecision.js';
 import { formatIDR } from './money.js';
+import { tandaiTopupDiterima } from './topup.js';
 import { nowIso } from './time.js';
 
 export type KodeJenis =
   | 'pribadi' | 'company' | 'reimburse' | 'talangan' | 'bersama' | 'transfer'
-  | 'tabungan' | 'hadiah' | 'refund' | 'pemasukan' | 'fee' | 'belum_yakin';
+  | 'tabungan' | 'hadiah' | 'refund' | 'pemasukan' | 'topup' | 'fee' | 'belum_yakin';
 
 export type DefJenis = {
   kode: KodeJenis;
@@ -41,7 +42,8 @@ export const DAFTAR_JENIS: DefJenis[] = [
   { kode: 'tabungan', label: '🐷 Tabungan', arah: 'semua', menutup: true },
   { kode: 'hadiah', label: '🎁 Hadiah', arah: 'keluar', menutup: false },
   { kode: 'refund', label: '↩️ Refund', arah: 'masuk', menutup: false },
-  { kode: 'pemasukan', label: '💰 Pemasukan', arah: 'masuk', menutup: false },
+  { kode: 'pemasukan', label: '💰 Pemasukan', arah: 'masuk', menutup: true },
+  { kode: 'topup', label: '🎁 Top-up diterima', arah: 'masuk', menutup: true },
   { kode: 'fee', label: '🏦 Biaya layanan / fee', arah: 'keluar', menutup: false },
   { kode: 'belum_yakin', label: '❔ Belum yakin', arah: 'semua', menutup: false },
 ];
@@ -128,6 +130,10 @@ export function terapkanJenis(
         satuPotongan('pemasukan', null);
         konfirmasi();
         return { def, pesan: 'Dicatat sebagai pemasukan.' };
+      case 'topup': {
+        const hasil = tandaiTopupDiterima(cashEventId, actor, database);
+        return { def, pesan: hasil.pesan };
+      }
       case 'fee': {
         const kat = database.prepare(`SELECT id FROM category WHERE slug = 'biaya-admin' AND active = 1`).get() as
           | { id: number }
