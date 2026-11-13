@@ -189,6 +189,49 @@ function absorbProvisional(
   return row.id;
 }
 
+/**
+ * Saat top-up sudah dicatat manual dan notifikasi bank masuk belakangan, tautkan
+ * buktinya ke transaksi itu, bukan membuat pemasukan kedua. Hanya pencocokan
+ * yang UNIK (rekening, nominal, tanggal dekat) yang boleh digabung otomatis.
+ */
+function absorbManualTopup(
+  input: { direction: 'masuk' | 'keluar'; amount_minor: number; currency: string; occurred_at: string; account_id: number | null; reference_no: string | null },
+  evidenceId: number,
+  database: DB,
+): number | null {
+  if (input.direction !== 'masuk' || input.currency !== 'IDR' || !input.account_id) return null;
+  const candidates = database.prepare(`
+    SELECT ce.id FROM cash_event ce
+     WHERE ce.source = 'manual' AND ce.direction = 'masuk'
+       AND ce.kind = 'pemasukan_luar' AND ce.status <> 'dibatalkan'
+       AND ce.note LIKE '%Top-up diterima%'
+       AND ce.account_id = ? AND ce.amount_minor = ?
+       AND abs(julianday(ce.occurred_at) - julianday(?)) <= 1
+       AND NOT EXISTS (
+         SELECT 1 FROM cash_event_evidence link
+          JOIN evidence e ON e.id = link.evidence_id
+          WHERE link.cash_event_id = ce.id AND e.source = 'gmail' AND e.kind = 'notifikasi_bank'
+       )
+     LIMIT 2
+  `).all(input.account_id, input.amount_minor, input.occurred_at) as Array<{ id: number }>;
+  if (candidates.length !== 1) return null;
+  const id = candidates[0]!.id;
+  database.prepare(`
+    UPDATE cash_event SET reference_no = COALESCE(reference_no, ?),
+      status = 'terkonfirmasi', certainty = 'terverifikasi', updated_at = ? WHERE id = ?
+  `).run(input.reference_no, nowIso(), id);
+  database.prepare(`
+    INSERT OR IGNORE INTO cash_event_evidence (cash_event_id, evidence_id, role)
+    VALUES (?, ?, 'notifikasi_bank')
+  `).run(id, evidenceId);
+  writeAudit({
+    entity: 'cash_event', entity_id: id, actor: 'gmail-sync',
+    action: 'topup_manual_dikonfirmasi_bank',
+    reason: 'Notifikasi bank cocok unik dengan top-up manual; tidak membuat transaksi baru.',
+  }, database);
+  return id;
+}
+
 function applyMerchantRule(
   merchantNorm: string | null,
   database: DB,
@@ -258,6 +301,10 @@ function ingestTransaction(
   }
   if (tx.direction === 'masuk' && sumberAkun && tujuanAkun) {
     kind = 'transfer_internal';
+  } else if (tx.direction === 'masuk' && kind === 'belum_dikategorikan') {
+    // Jangan simpan uang masuk sebagai 'penyesuaian' (tidak dihitung sebagai pemasukan).
+    // Jenisnya masih dapat diubah melalui tombol Telegram: top-up / refund / transfer / reimburse.
+    kind = 'pemasukan_luar';
   }
 
   const input: CashEventInput = {
@@ -279,6 +326,24 @@ function ingestTransaction(
     evidence: [{ evidence_id: evidenceId, role: 'notifikasi_bank' }],
     actor: 'gmail-sync',
   };
+
+  const topupManual = absorbManualTopup(
+    {
+      direction: tx.direction,
+      amount_minor: tx.amount_minor,
+      currency: tx.currency,
+      occurred_at: tx.occurred_at,
+      account_id: input.account_id ?? null,
+      reference_no: tx.reference_no ?? null,
+    },
+    evidenceId,
+    database,
+  );
+  if (topupManual !== null) {
+    summary.transaksi_digabung += 1;
+    summary.catatan.push('Top-up manual dilengkapi notifikasi bank; tidak dihitung dua kali.');
+    return;
+  }
 
   // Lengkapi pembayaran sementara bila ada, agar kuitansi + notifikasi bank
   // tidak menjadi dua transaksi.
