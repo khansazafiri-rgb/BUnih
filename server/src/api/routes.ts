@@ -15,8 +15,9 @@ import { listServices, listInvoices, unidentifiedServices, tagihanMendekat, canc
 import { claimReceivable, listReceivables, writeOffReceivable } from '../domain/receivables.js';
 import { savingsReport } from '../domain/savings.js';
 import { monthlyReport, monthlyReportCsv, transactionsCsv } from '../domain/reports.js';
+import { categorySubtreeIds } from '../domain/categories.js';
 import { allCurrentAssumptions, assumptionHistory, setAssumption } from '../domain/assumptions.js';
-import { deleteScenario, listScenarios, upsertScenario } from '../domain/scenarios.js';
+import { deleteScenario, listScenarios, slugPerbandinganBawaan, upsertScenario } from '../domain/scenarios.js';
 import { bandingkanSkenario, simulasiPembelian } from '../domain/simulate.js';
 import { listDecisions, countOpenDecisions } from '../domain/decisions.js';
 import { applyDecision, bagiBiaya, jadikanCompanyLangsung, jadikanHadiah, jadikanPelunasanPiutang, jadikanReimburseCompany, jadikanTalangan, jadikanTransferSendiri } from '../domain/applyDecision.js';
@@ -28,6 +29,7 @@ import { authUrl, exchangeCode, gmailStatus, oauthConfigured, revokeGmail } from
 import { defaultQuery, syncHistorical, syncIncremental, syncState } from '../gmail/sync.js';
 import { importSheetTab, inspectSheetCsv, importHistory, importItems, FIELDS, type SheetTab } from '../importer/sheet.js';
 import { importBankCsv, inspectBankCsv, pdfTextToCsv } from '../importer/bank.js';
+import { buatRouterV2 } from './routesV2.js';
 import { buatToken, hapusSesiCookie, periksaKataSandi, setSesiCookie, sudahMasuk, wajibMasuk } from './auth.js';
 
 const TANGGAL = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -99,6 +101,7 @@ export function buatRouter(): Router {
 
   // Semua di bawah ini butuh sesi.
   r.use(wajibMasuk);
+  r.use(buatRouterV2());
 
   // ------------------------------------------------------------------ beranda
   r.get(
@@ -108,10 +111,10 @@ export function buatRouter(): Router {
       const hariIni = today();
       const saldo = balanceSummary(undefined, database);
       const tanpa = project({ dari: hariIni, sampai: addDays(hariIni, 45) }, database);
-      const dengan = project(
-        { dari: hariIni, sampai: addDays(hariIni, 45), skenario: 'dengan-claude-pribadi' },
-        database,
-      );
+      const pembandingRow = listScenarios(database).find((x) => x.is_baseline !== 1);
+      const dengan = pembandingRow
+        ? project({ dari: hariIni, sampai: addDays(hariIni, 45), skenario: pembandingRow.slug }, database)
+        : null;
       const tagihan = tagihanMendekat({ hari: 30 }, database);
       const piutang = listReceivables({ onlyOpen: true }, database);
       const periode = periodReport({}, database);
@@ -165,20 +168,22 @@ export function buatRouter(): Router {
           jumlah_terlambat: piutang.jumlah_terlambat,
         },
         skenario: {
-          tanpa_claude: {
+          dasar: {
             nama: tanpa.skenario.nama,
             saldo_terendah_minor: tanpa.ringkasan.saldo_terendah_minor,
             saldo_terendah_tanggal: tanpa.ringkasan.saldo_terendah_tanggal,
             tanggal_defisit: tanpa.ringkasan.tanggal_defisit,
             saldo_akhir_minor: tanpa.ringkasan.saldo_akhir_minor,
           },
-          dengan_claude: {
-            nama: dengan.skenario.nama,
-            saldo_terendah_minor: dengan.ringkasan.saldo_terendah_minor,
-            saldo_terendah_tanggal: dengan.ringkasan.saldo_terendah_tanggal,
-            tanggal_defisit: dengan.ringkasan.tanggal_defisit,
-            saldo_akhir_minor: dengan.ringkasan.saldo_akhir_minor,
-          },
+          pembanding: dengan
+            ? {
+                nama: dengan.skenario.nama,
+                saldo_terendah_minor: dengan.ringkasan.saldo_terendah_minor,
+                saldo_terendah_tanggal: dengan.ringkasan.saldo_terendah_tanggal,
+                tanggal_defisit: dengan.ringkasan.tanggal_defisit,
+                saldo_akhir_minor: dengan.ringkasan.saldo_akhir_minor,
+              }
+            : null,
         },
         cadangan_minimal_minor: tanpa.ringkasan.cadangan_minimal_minor,
         perlu_tindakan: {
@@ -256,6 +261,8 @@ export function buatRouter(): Router {
           sampai: TANGGAL.optional(),
           rekening: z.coerce.number().optional(),
           kategori: z.coerce.number().optional(),
+          merchant: z.coerce.number().optional(),
+          proyek: z.string().optional(),
           jenis: z.string().optional(),
           status: z.string().optional(),
           penanggung: z.string().optional(),
@@ -281,8 +288,21 @@ export function buatRouter(): Router {
         params.push(q.rekening);
       }
       if (q.kategori) {
-        where.push(`ce.category_id = ?`);
-        params.push(q.kategori);
+        // Kategori dibaca dari potongan alokasi (sama seperti laporan), termasuk turunannya.
+        const ids = categorySubtreeIds(q.kategori, db());
+        where.push(
+          `EXISTS (SELECT 1 FROM allocation a WHERE a.cash_event_id = ce.id
+             AND COALESCE(a.category_id, ce.category_id) IN (${ids.map(() => '?').join(',')}))`,
+        );
+        params.push(...ids);
+      }
+      if (q.merchant) {
+        where.push(`ce.merchant_id = ?`);
+        params.push(q.merchant);
+      }
+      if (q.proyek) {
+        where.push(`lower(ce.project) = lower(?)`);
+        params.push(q.proyek);
       }
       if (q.jenis) {
         where.push(`ce.kind = ?`);
@@ -310,12 +330,13 @@ export function buatRouter(): Router {
 
       const database = db();
       const sql = `
-        SELECT ce.*, a.name AS rekening, c.name AS kategori, s.name AS layanan,
+        SELECT ce.*, a.name AS rekening, c.name AS kategori, c.icon AS kategori_ikon, mc.name AS merchant_nama, s.name AS layanan,
                (SELECT COUNT(*) FROM cash_event_evidence cee WHERE cee.cash_event_id = ce.id) AS jumlah_bukti
           FROM cash_event ce
           LEFT JOIN account a ON a.id = ce.account_id
           LEFT JOIN category c ON c.id = ce.category_id
           LEFT JOIN service s ON s.id = ce.service_id
+          LEFT JOIN merchant mc ON mc.id = ce.merchant_id
          WHERE ${where.join(' AND ')}
          ORDER BY ce.occurred_at DESC, ce.id DESC
          LIMIT ? OFFSET ?`;
@@ -581,7 +602,7 @@ export function buatRouter(): Router {
   );
 
   // -------------------------------------------------------------- skenario
-  r.get('/skenario', bungkus(() => listScenarios(db())));
+  r.get('/skenario', bungkus((req) => listScenarios(db(), { termasukTersembunyi: req.query['semua'] === '1' })));
   r.post(
     '/skenario',
     bungkus((req) => {
@@ -610,7 +631,7 @@ export function buatRouter(): Router {
       const q = z
         .object({ slugs: z.string().optional(), dari: TANGGAL.optional(), sampai: TANGGAL.optional() })
         .parse(req.query);
-      const slugs = q.slugs ? q.slugs.split(',') : ['tanpa-claude-pribadi', 'dengan-claude-pribadi'];
+      const slugs = q.slugs ? q.slugs.split(',') : slugPerbandinganBawaan(db());
       return bandingkanSkenario(slugs, { dari: q.dari, sampai: q.sampai }, db());
     }),
   );
@@ -815,7 +836,6 @@ export function buatRouter(): Router {
   );
 
   // ------------------------------------------------------------- kategori
-  r.get('/kategori', bungkus(() => db().prepare(`SELECT * FROM category ORDER BY group_name, name`).all()));
   r.get('/orang', bungkus(() => db().prepare(`SELECT * FROM person ORDER BY kind, name`).all()));
 
   // --------------------------------------------------------------- laporan

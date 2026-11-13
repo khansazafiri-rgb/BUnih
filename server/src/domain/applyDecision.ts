@@ -9,6 +9,7 @@ import { answerDecision, getDecision, type DecisionRow } from './decisions.js';
 import { setTopupStatus } from './topup.js';
 import { recordReconciliation } from './balances.js';
 import { writeAudit } from './audit.js';
+import { ensurePerson } from './people.js';
 
 export type Lanjutan =
   | { tipe: 'pilih_kategori'; cash_event_id: number }
@@ -22,27 +23,7 @@ export type ApplyResult = {
   lanjutan?: Lanjutan;
 };
 
-function personId(
-  kind: 'company' | 'teman',
-  nama: string | null,
-  database: DB,
-): number | null {
-  if (kind === 'company') {
-    const row = database.prepare(`SELECT id FROM person WHERE kind = 'company' LIMIT 1`).get() as
-      | { id: number }
-      | undefined;
-    return row?.id ?? null;
-  }
-  if (!nama) return null;
-  const existing = database
-    .prepare(`SELECT id FROM person WHERE kind = 'teman' AND lower(name) = lower(?)`)
-    .get(nama) as { id: number } | undefined;
-  if (existing) return existing.id;
-  const res = database
-    .prepare(`INSERT INTO person (kind, name, note, created_at) VALUES ('teman', ?, NULL, ?)`)
-    .run(nama, nowIso());
-  return Number(res.lastInsertRowid);
-}
+const personId = (kind: 'company' | 'teman', nama: string | null, database: DB) => ensurePerson(kind, nama, database);
 
 function konfirmasiTransaksi(cashEventId: number, database: DB): void {
   database

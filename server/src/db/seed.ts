@@ -1,5 +1,6 @@
 import type { Database as DB } from 'better-sqlite3';
 import { nowIso } from '../domain/time.js';
+import { config } from '../config.js';
 
 /**
  * Seed hanya mengisi KATALOG dan ASUMSI.
@@ -25,7 +26,33 @@ const CATEGORIES: Array<[string, string, string, number]> = [
   ['tabungan', 'Tabungan', 'tabungan', 0],
   ['biaya-admin', 'Biaya admin bank', 'lainnya', 0],
   ['lainnya', 'Lainnya', 'lainnya', 0],
+  ['groceries', 'Belanja bahan makanan', 'belanja', 0],
+  ['hiburan', 'Hiburan', 'lainnya', 0],
+  ['fee-profesional', 'Fee profesional', 'bisnis', 0],
+  ['bisnis', 'Biaya bisnis', 'bisnis', 0],
 ];
+
+/** Ikon bawaan supaya daftar kategori mudah dikenali sekilas. Tidak menimpa ikon pilihan pengguna. */
+const IKON_KATEGORI: Record<string, string> = {
+  makan: '🍚',
+  transport: '🚌',
+  'kebutuhan-harian': '🧴',
+  'langganan-ai': '🤖',
+  'langganan-lain': '📺',
+  'server-hosting': '🖥️',
+  'kredit-api': '🔌',
+  'belanja-barang': '🛍️',
+  hadiah: '🎁',
+  kesehatan: '💊',
+  pendidikan: '📚',
+  tabungan: '🐷',
+  'biaya-admin': '🏦',
+  lainnya: '📦',
+  groceries: '🛒',
+  hiburan: '🎮',
+  'fee-profesional': '🧾',
+  bisnis: '💼',
+};
 
 /**
  * Nilai dari tab PENGATURAN Sheet. Semuanya 'asumsi_sheet' sampai dikonfirmasi.
@@ -396,6 +423,8 @@ const NOTIFICATION_TYPES: Array<[string, string]> = [
   ['langganan_tertagih_lagi', 'langsung'],
   ['pembelian_ganggu_tagihan', 'langsung'],
   ['sinkronisasi_gagal', 'harian'],
+  ['anggaran_berisiko', 'harian'],
+  ['tujuan_berisiko', 'mingguan'],
 ];
 
 const MERCHANT_RULES: Array<{
@@ -417,8 +446,30 @@ const MERCHANT_RULES: Array<{
   { pattern: 'google', service_slug: 'google-ai-pro-5tb', category: 'langganan-ai', kind: 'bayar_langganan', auto_approve: 0 },
 ];
 
-export function seed(database: DB): SeedStats {
+export type ProfilSeed = 'bersih' | 'warisan' | 'otomatis';
+
+/**
+ * Isi data awal.
+ *
+ *  - 'bersih'  : instalasi baru tanpa spreadsheet. Hanya kategori, rekening kosong,
+ *                pengaturan notifikasi, dan satu rencana dasar. Semua angka diisi pengguna.
+ *  - 'warisan' : katalog layanan, tagihan, dan asumsi yang berasal dari Google Sheet lama.
+ *  - 'otomatis': database yang sudah berisi layanan/asumsi diperlakukan sebagai 'warisan'
+ *                (tidak ada yang berubah); database kosong memakai BUNIH_SEED_PROFILE.
+ *
+ * Semua penyisipan memakai INSERT OR IGNORE: menjalankan ulang tidak menimpa apa pun.
+ */
+export function seed(database: DB, opts: { profil?: ProfilSeed } = {}): SeedStats {
   const at = nowIso();
+  const profil = opts.profil ?? 'otomatis';
+  const sudahAda =
+    (
+      database
+        .prepare(`SELECT (SELECT COUNT(*) FROM service WHERE COALESCE(note,'') NOT LIKE '%[CONTOH]%') + (SELECT COUNT(*) FROM assumption) AS n`)
+        .get() as { n: number }
+    ).n > 0;
+  const warisan =
+    profil === 'warisan' || (profil === 'otomatis' && (sudahAda || config.BUNIH_SEED_PROFILE === 'warisan'));
   const stats: SeedStats = {};
   const bump = (k: string, n = 1) => {
     stats[k] = (stats[k] ?? 0) + n;
@@ -448,6 +499,8 @@ export function seed(database: DB): SeedStats {
     for (const [slug, name, group, routine] of CATEGORIES) {
       if (insCat.run(slug, name, group, routine, at).changes) bump('category');
     }
+    const setIkon = database.prepare(`UPDATE category SET icon = ? WHERE slug = ? AND icon IS NULL`);
+    for (const [slug, ikon] of Object.entries(IKON_KATEGORI)) setIkon.run(ikon, slug);
 
     // Rekening — belum terverifikasi sampai pengguna mengonfirmasi 4 digit terakhir.
     const insAcc = database.prepare(
@@ -478,118 +531,127 @@ export function seed(database: DB): SeedStats {
     )
       bump('account');
 
-    // Asumsi berversi — hanya ditulis bila kunci itu belum pernah ada.
-    const hasAssumption = database.prepare(`SELECT 1 FROM assumption WHERE key = ? LIMIT 1`);
-    const insAssumption = database.prepare(
-      `INSERT INTO assumption (key, value_json, effective_from, effective_to, certainty, source, note, created_at)
-       VALUES (?, ?, '1970-01-01', NULL, 'asumsi_sheet', 'sheet', ?, ?)`,
-    );
-    for (const a of ASSUMPTIONS) {
-      if (!hasAssumption.get(a.key)) {
-        insAssumption.run(a.key, JSON.stringify(a.value), a.note, at);
-        bump('assumption');
-      }
-    }
-
-    // Katalog layanan
-    const insSvc = database.prepare(
-      `INSERT OR IGNORE INTO service
-        (slug, name, vendor, plan, bearer, paid_by, billing_cycle, amount_minor, currency,
-         amount_certainty, next_due_date, due_date_certainty, benefit_period_start, benefit_period_end,
-         status, scenario_tag, cancelled_at, reserve_for_renewal_minor, note, created_at, updated_at)
-       VALUES (@slug, @name, @vendor, @plan, @bearer, @paid_by, @billing_cycle, @amount_minor, @currency,
-         @amount_certainty, @next_due_date, @due_date_certainty, @benefit_period_start, @benefit_period_end,
-         @status, @scenario_tag, @cancelled_at, @reserve_for_renewal_minor, @note, @at, @at)`,
-    );
-    for (const s of SERVICES) {
-      const changes = insSvc.run({
-        slug: s.slug,
-        name: s.name,
-        vendor: s.vendor,
-        plan: s.plan ?? null,
-        bearer: s.bearer,
-        paid_by: s.paid_by,
-        billing_cycle: s.billing_cycle,
-        amount_minor: s.amount_minor,
-        currency: s.currency ?? 'IDR',
-        amount_certainty: s.amount_certainty,
-        next_due_date: s.next_due_date,
-        due_date_certainty: s.due_date_certainty,
-        benefit_period_start: s.benefit_period_start ?? null,
-        benefit_period_end: s.benefit_period_end ?? null,
-        status: s.status,
-        scenario_tag: s.scenario_tag ?? null,
-        cancelled_at: s.cancelled_at ?? null,
-        reserve_for_renewal_minor: s.reserve_for_renewal_minor ?? null,
-        note: s.note,
-        at,
-      }).changes;
-      if (changes) bump('service');
-    }
-
-    // Invoice yang disebut pengguna
     const svcId = database.prepare(`SELECT id FROM service WHERE slug = ?`);
-    const insInv = database.prepare(
-      `INSERT OR IGNORE INTO invoice
-        (service_id, invoice_no, issued_at, due_date, period_start, period_end, amount_minor, currency,
-         amount_idr_actual, status, paid_by, reimbursable, dedupe_key, note, created_at, updated_at)
-       VALUES (@service_id, @invoice_no, NULL, @due_date, @period_start, @period_end, @amount_minor, 'IDR',
-         NULL, @status, @paid_by, @reimbursable, @dedupe_key, @note, @at, @at)`,
-    );
-    const insStatusEvent = database.prepare(
-      `INSERT INTO invoice_status_event (invoice_id, status, occurred_at, evidence_id, note, created_at)
-       VALUES (?, ?, ?, NULL, ?, ?)`,
-    );
-    for (const inv of INVOICES) {
-      const svc = svcId.get(inv.service_slug) as { id: number } | undefined;
-      if (!svc) continue;
-      const dedupe = `seed:${inv.service_slug}:${inv.due_date}:${inv.amount_minor}`;
-      const res = insInv.run({
-        service_id: svc.id,
-        invoice_no: inv.invoice_no,
-        due_date: inv.due_date,
-        period_start: inv.period_start,
-        period_end: inv.period_end,
-        amount_minor: inv.amount_minor,
-        status: inv.status,
-        paid_by: inv.paid_by,
-        reimbursable: inv.reimbursable,
-        dedupe_key: dedupe,
-        note: inv.note,
-        at,
-      });
-      if (res.changes) {
-        bump('invoice');
-        insStatusEvent.run(
-          Number(res.lastInsertRowid),
-          inv.status,
-          `${inv.due_date}T00:00:00+07:00`,
-          'Dibuat dari seed katalog awal (pernyataan pengguna, belum ada bukti tertaut).',
-          at,
-        );
-      }
-    }
 
-    // Skenario
-    const insScn = database.prepare(
-      `INSERT OR IGNORE INTO scenario
-        (slug, name, description, is_baseline, enabled_tags, overrides_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const s of SCENARIOS) {
-      if (
-        insScn.run(
-          s.slug,
-          s.name,
-          s.description,
-          s.is_baseline,
-          JSON.stringify(s.enabled_tags),
-          JSON.stringify(s.overrides),
+    if (warisan) {
+      // Asumsi berversi — hanya ditulis bila kunci itu belum pernah ada.
+      const hasAssumption = database.prepare(`SELECT 1 FROM assumption WHERE key = ? LIMIT 1`);
+      const insAssumption = database.prepare(
+        `INSERT INTO assumption (key, value_json, effective_from, effective_to, certainty, source, note, created_at)
+         VALUES (?, ?, '1970-01-01', NULL, 'asumsi_sheet', 'sheet', ?, ?)`,
+      );
+      for (const a of ASSUMPTIONS) {
+        if (!hasAssumption.get(a.key)) {
+          insAssumption.run(a.key, JSON.stringify(a.value), a.note, at);
+          bump('assumption');
+        }
+      }
+
+      // Katalog layanan
+      const insSvc = database.prepare(
+        `INSERT OR IGNORE INTO service
+          (slug, name, vendor, plan, bearer, paid_by, billing_cycle, amount_minor, currency,
+           amount_certainty, next_due_date, due_date_certainty, benefit_period_start, benefit_period_end,
+           status, scenario_tag, cancelled_at, reserve_for_renewal_minor, note, created_at, updated_at)
+         VALUES (@slug, @name, @vendor, @plan, @bearer, @paid_by, @billing_cycle, @amount_minor, @currency,
+           @amount_certainty, @next_due_date, @due_date_certainty, @benefit_period_start, @benefit_period_end,
+           @status, @scenario_tag, @cancelled_at, @reserve_for_renewal_minor, @note, @at, @at)`,
+      );
+      for (const s of SERVICES) {
+        const changes = insSvc.run({
+          slug: s.slug,
+          name: s.name,
+          vendor: s.vendor,
+          plan: s.plan ?? null,
+          bearer: s.bearer,
+          paid_by: s.paid_by,
+          billing_cycle: s.billing_cycle,
+          amount_minor: s.amount_minor,
+          currency: s.currency ?? 'IDR',
+          amount_certainty: s.amount_certainty,
+          next_due_date: s.next_due_date,
+          due_date_certainty: s.due_date_certainty,
+          benefit_period_start: s.benefit_period_start ?? null,
+          benefit_period_end: s.benefit_period_end ?? null,
+          status: s.status,
+          scenario_tag: s.scenario_tag ?? null,
+          cancelled_at: s.cancelled_at ?? null,
+          reserve_for_renewal_minor: s.reserve_for_renewal_minor ?? null,
+          note: s.note,
           at,
+        }).changes;
+        if (changes) bump('service');
+      }
+
+      // Invoice yang disebut pengguna
+      const svcId = database.prepare(`SELECT id FROM service WHERE slug = ?`);
+      const insInv = database.prepare(
+        `INSERT OR IGNORE INTO invoice
+          (service_id, invoice_no, issued_at, due_date, period_start, period_end, amount_minor, currency,
+           amount_idr_actual, status, paid_by, reimbursable, dedupe_key, note, created_at, updated_at)
+         VALUES (@service_id, @invoice_no, NULL, @due_date, @period_start, @period_end, @amount_minor, 'IDR',
+           NULL, @status, @paid_by, @reimbursable, @dedupe_key, @note, @at, @at)`,
+      );
+      const insStatusEvent = database.prepare(
+        `INSERT INTO invoice_status_event (invoice_id, status, occurred_at, evidence_id, note, created_at)
+         VALUES (?, ?, ?, NULL, ?, ?)`,
+      );
+      for (const inv of INVOICES) {
+        const svc = svcId.get(inv.service_slug) as { id: number } | undefined;
+        if (!svc) continue;
+        const dedupe = `seed:${inv.service_slug}:${inv.due_date}:${inv.amount_minor}`;
+        const res = insInv.run({
+          service_id: svc.id,
+          invoice_no: inv.invoice_no,
+          due_date: inv.due_date,
+          period_start: inv.period_start,
+          period_end: inv.period_end,
+          amount_minor: inv.amount_minor,
+          status: inv.status,
+          paid_by: inv.paid_by,
+          reimbursable: inv.reimbursable,
+          dedupe_key: dedupe,
+          note: inv.note,
           at,
-        ).changes
-      )
-        bump('scenario');
+        });
+        if (res.changes) {
+          bump('invoice');
+          insStatusEvent.run(
+            Number(res.lastInsertRowid),
+            inv.status,
+            `${inv.due_date}T00:00:00+07:00`,
+            'Dibuat dari seed katalog awal (pernyataan pengguna, belum ada bukti tertaut).',
+            at,
+          );
+        }
+      }
+
+      // Skenario
+      const insScn = database.prepare(
+        `INSERT OR IGNORE INTO scenario
+          (slug, name, description, is_baseline, enabled_tags, overrides_json, hidden, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const s of SCENARIOS) {
+        // Skenario khusus Claude warisan Sheet tidak ditampilkan di pengalaman bawaan, sama seperti
+        // yang dilakukan migrasi 002 pada database yang sudah berisi. Datanya tetap ada.
+        const tersembunyi = s.slug === 'dengan-claude-pribadi' ? 1 : 0;
+        if (
+          insScn.run(
+            s.slug,
+            s.name,
+            s.description,
+            s.is_baseline,
+            JSON.stringify(s.enabled_tags),
+            JSON.stringify(s.overrides),
+            tersembunyi,
+            at,
+            at,
+          ).changes
+        )
+          bump('scenario');
+      }
+
     }
 
     // Notifikasi
@@ -601,18 +663,35 @@ export function seed(database: DB): SeedStats {
       if (insNotif.run(type, freq, at).changes) bump('notification_setting');
     }
 
-    // Aturan merchant
-    const catId = database.prepare(`SELECT id FROM category WHERE slug = ?`);
-    const insRule = database.prepare(
-      `INSERT OR IGNORE INTO merchant_rule
-        (pattern, category_id, kind, bearer_type, service_id, confidence, auto_approve, created_at)
-       VALUES (?, ?, ?, NULL, ?, 0.85, ?, ?)`,
-    );
-    for (const r of MERCHANT_RULES) {
-      const cat = catId.get(r.category) as { id: number } | undefined;
-      const svc = r.service_slug ? (svcId.get(r.service_slug) as { id: number } | undefined) : undefined;
-      if (insRule.run(r.pattern, cat?.id ?? null, r.kind, svc?.id ?? null, r.auto_approve, at).changes)
-        bump('merchant_rule');
+    if (warisan) {
+      // Aturan merchant
+      const catId = database.prepare(`SELECT id FROM category WHERE slug = ?`);
+      const insRule = database.prepare(
+        `INSERT OR IGNORE INTO merchant_rule
+          (pattern, category_id, kind, bearer_type, service_id, confidence, auto_approve, created_at)
+         VALUES (?, ?, ?, NULL, ?, 0.85, ?, ?)`,
+      );
+      for (const r of MERCHANT_RULES) {
+        const cat = catId.get(r.category) as { id: number } | undefined;
+        const svc = r.service_slug ? (svcId.get(r.service_slug) as { id: number } | undefined) : undefined;
+        if (insRule.run(r.pattern, cat?.id ?? null, r.kind, svc?.id ?? null, r.auto_approve, at).changes)
+          bump('merchant_rule');
+      }
+
+    }
+
+    if (!warisan) {
+      const adaDasar = database.prepare(`SELECT 1 FROM scenario WHERE is_baseline = 1 LIMIT 1`).get();
+      if (!adaDasar) {
+        database
+          .prepare(
+            `INSERT OR IGNORE INTO scenario
+              (slug, name, description, is_baseline, enabled_tags, overrides_json, created_at, updated_at)
+             VALUES ('dasar', 'Rencana dasar', 'Rencana berdasarkan data dan pengaturanmu saat ini.', 1, '[]', '{}', ?, ?)`,
+          )
+          .run(at, at);
+        bump('scenario');
+      }
     }
 
     // Keadaan Gmail (singleton)

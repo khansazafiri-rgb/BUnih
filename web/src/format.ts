@@ -67,7 +67,7 @@ export function tambahHari(iso: string, n: number): string {
 export const LABEL_KEPASTIAN: Record<string, string> = {
   terverifikasi: 'Aktual',
   perkiraan: 'Perkiraan',
-  asumsi_sheet: 'Asumsi Sheet',
+  asumsi_sheet: 'Asumsi awal',
 };
 
 export const LABEL_JENIS: Record<string, string> = {

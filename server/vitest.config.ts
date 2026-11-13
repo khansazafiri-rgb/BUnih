@@ -12,6 +12,7 @@ export default defineConfig({
       TELEGRAM_MODE: 'off',
       BUNIH_ENABLE_SCHEDULER: 'false',
       BUNIH_SECRET_KEY: 'kunci-uji-coba-saja',
+      TELEGRAM_ALLOWED_CHAT_ID: '1001',
     },
   },
 });

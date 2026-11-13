@@ -255,6 +255,7 @@ export type Transaksi = {
   note: string | null;
   rekening: string | null;
   kategori: string | null;
+  merchant_nama?: string | null;
   layanan: string | null;
   jumlah_bukti: number;
 };
@@ -319,4 +320,254 @@ export type HasilSimulasi = {
   alasan: string[];
   ketidakpastian: RisikoItem[];
   saran: string[];
+};
+
+/* ====================================================================== v2 */
+
+export type StatusAnggaran = 'aman' | 'berisiko' | 'lewat' | 'belum_mulai' | 'selesai';
+
+export type Anggaran = {
+  id: number;
+  nama: string;
+  kategori_id: number | null;
+  kategori_nama: string | null;
+  kategori_ikon: string | null;
+  periode: 'harian' | 'mingguan' | 'bulanan' | 'kustom';
+  berulang: boolean;
+  rollover: boolean;
+  jendela: { dari: string; sampai: string; total_hari: number };
+  nominal_periode_minor: number;
+  carry_minor: number;
+  dialokasikan_minor: number;
+  terpakai_minor: number;
+  sisa_minor: number;
+  persen_terpakai: number;
+  hari_berjalan: number;
+  hari_tersisa: number;
+  sisa_per_hari_minor: number;
+  jadwal_minor: number;
+  lebih_cepat_dari_jadwal: boolean;
+  perkiraan_akhir_minor: number | null;
+  perkiraan_terbatas: boolean;
+  status: StatusAnggaran;
+  status_teks: string;
+};
+
+export type RisikoTujuan =
+  | 'tercapai' | 'tepat' | 'berisiko' | 'terlambat' | 'belum_ada_setoran' | 'tanpa_tanggal' | 'dijeda' | 'dibatalkan';
+
+export type Tujuan = {
+  id: number;
+  nama: string;
+  ikon: string | null;
+  status: 'aktif' | 'dijeda' | 'tercapai' | 'dibatalkan';
+  target_minor: number;
+  mulai_minor: number;
+  terkumpul_minor: number;
+  dari_transfer_tercatat_minor: number;
+  disisihkan_minor: number;
+  sisa_minor: number;
+  persen: number;
+  target_date: string | null;
+  hari_tersisa: number | null;
+  perlu_per_bulan_minor: number | null;
+  perlu_per_minggu_minor: number | null;
+  laju_bulanan_minor: number;
+  perkiraan_tercapai: string | null;
+  risiko: RisikoTujuan;
+  penjelasan: string;
+  rekening_nama: string | null;
+  pengingat: boolean;
+  catatan: string | null;
+};
+
+export type KategoriBaris = {
+  category_id: number | null;
+  nama: string;
+  ikon: string;
+  jumlah_minor: number;
+  persen: number;
+  jumlah_transaksi: number;
+  sebelumnya_minor: number;
+  perubahan_persen: number | null;
+  belum_dikategorikan: boolean;
+  anak: Array<{ category_id: number | null; nama: string; ikon: string; jumlah_minor: number; jumlah_transaksi: number }>;
+};
+
+export type MerchantBaris = {
+  merchant_id: number | null;
+  nama: string;
+  jumlah_transaksi: number;
+  total_minor: number;
+  rata_rata_minor: number;
+  pertama: string;
+  terakhir: string;
+  sebelumnya_transaksi: number;
+  sebelumnya_total_minor: number;
+  perubahan_transaksi: number;
+};
+
+export type TitikTren = { awal: string; akhir: string; label: string; pengeluaran_minor: number; pemasukan_minor: number };
+
+export type Insight = {
+  kunci: string;
+  tingkat: 'info' | 'perhatian' | 'baik';
+  teks: string;
+  angka: Record<string, number | string | null>;
+  rincian?: { kategori_id?: number | null; merchant_id?: number | null; tanpa_kategori?: boolean };
+};
+
+export type Rentang = {
+  preset: string;
+  label: string;
+  dari: string;
+  sampai: string;
+  hari: number;
+  sebelumnya: { dari: string; sampai: string; hari: number; label: string };
+};
+
+export type DataAnalitik = {
+  rentang: Rentang;
+  ringkasan: {
+    pemasukan_minor: number;
+    pemasukan_sebelumnya_minor: number;
+    arus_kas_masuk_minor: number;
+    arus_kas_keluar_minor: number;
+    arus_kas_neto_minor: number;
+    pengeluaran_pribadi_neto_minor: number;
+    pengeluaran_pribadi_sebelumnya_minor: number;
+    perubahan_persen: number | null;
+    saldo_terverifikasi_minor: number | null;
+    saldo_lengkap: boolean;
+    tabungan_neto_minor: number;
+    tujuan: { jumlah_aktif: number; terkumpul_minor: number; target_minor: number };
+    anggaran: { jumlah: number; aman: number; berisiko: number; lewat: number; keseluruhan: Anggaran | null };
+  };
+  kualitas_data: {
+    belum_dikategorikan_jumlah: number;
+    belum_dikategorikan_minor: number;
+    perlu_verifikasi_jumlah: number;
+    tanpa_merchant_jumlah: number;
+    jumlah_transaksi: number;
+  };
+  kategori: KategoriBaris[];
+  merchant: { paling_sering: MerchantBaris[]; paling_besar_total: MerchantBaris[]; kebiasaan_berubah: MerchantBaris[] };
+  makanan: {
+    tersedia: boolean;
+    alasan?: string;
+    total_minor: number;
+    jumlah_transaksi: number;
+    rata_per_hari_minor: number;
+    hari_berjalan: number;
+    hari_dengan_catatan: number;
+    hari_tanpa_catatan: number;
+    sebelumnya_total_minor: number;
+    perubahan_persen: number | null;
+    paling_sering: MerchantBaris[];
+    paling_besar_total: MerchantBaris[];
+    transaksi_termahal: Array<{ cash_event_id: number; tanggal: string; merchant: string; jumlah_minor: number }>;
+    tren_bulanan: Array<{ bulan: string; label: string; total_minor: number }>;
+    anggaran: Anggaran | null;
+    tanpa_merchant_jumlah: number;
+  };
+  tren: { granularitas: 'harian' | 'mingguan' | 'bulanan'; titik: TitikTren[] };
+  berulang_vs_sesuka: { berulang_minor: number; sesuka_minor: number; persen_berulang: number };
+  tidak_biasa: Array<{ cash_event_id: number; tanggal: string; merchant: string; kategori: string; jumlah_minor: number; biasanya_minor: number; sampel: number; alasan: string }>;
+  langganan: {
+    total_bulanan_pribadi_minor: number;
+    total_bulanan_company_minor: number;
+    jumlah_aktif: number;
+    tanpa_nominal: number;
+    per_jenis: Array<{ jenis: string; bulanan_minor: number; jumlah: number }>;
+    akan_ditagih: Array<{ service_id: number; nama: string; tanggal: string | null; nominal_minor: number | null; penanggung: string }>;
+    kenaikan_biaya: Array<{ service_id: number; nama: string; dari_minor: number; ke_minor: number; persen: number }>;
+    mungkin_tidak_dibutuhkan: Array<{ service_id: number; nama: string; terakhir_dibayar: string; alasan: string }>;
+  };
+  insight: Insight[];
+};
+
+export type BarisRincian = {
+  alokasi_id: number;
+  cash_event_id: number;
+  tanggal: string;
+  waktu: string;
+  merchant: string;
+  kategori: string;
+  jumlah_minor: number;
+  kind: string;
+  project: string | null;
+  status: string;
+  rekening: string | null;
+  refund: boolean;
+};
+
+export type DataRincian = { total_minor: number; jumlah_potongan: number; jumlah_transaksi: number; terpotong: boolean; baris: BarisRincian[] };
+
+export type Wajah = 'senang' | 'biasa' | 'khawatir' | 'kosong';
+
+export type DataDashboard = {
+  hari_ini: string;
+  bulan: string;
+  adaData: boolean;
+  jawaban: { wajah: Wajah; judul: string; kalimat: string; alasan: string[] };
+  uang: {
+    saldo_terverifikasi_minor: number | null;
+    lengkap: boolean;
+    rekening: Array<{ nama: string; last4: string | null; saldo_minor: number | null; tabungan: boolean }>;
+    dalam_perjalanan_minor: number;
+    catatan: string[];
+  };
+  pemakaian: {
+    dari: string;
+    sampai: string;
+    hari_berjalan: number;
+    hari_dalam_bulan: number;
+    total_minor: number;
+    sebelumnya_minor: number;
+    sebelumnya_label: string;
+    perubahan_persen: number | null;
+    rata_per_hari_minor: number;
+    kategori: Array<{ category_id: number | null; nama: string; ikon: string; jumlah_minor: number; persen: number; belum_dikategorikan: boolean }>;
+    lainnya_minor: number;
+    lainnya_jumlah: number;
+  };
+  tujuh_hari: Array<{ tanggal: string; label: string; jumlah_minor: number; hari_ini: boolean }>;
+  anggaran: Anggaran[];
+  anggaran_total: number;
+  tujuan: Tujuan[];
+  tujuan_total: number;
+  tagihan: {
+    daftar: Array<{ obligation_id: number; label: string; tanggal: string; nominal_minor: number | null; kepastian: string; penanggung: string; pembayar: string; terlambat: boolean }>;
+    dana_14_hari_minor: number;
+    tanpa_nominal: number;
+  };
+  proyeksi: { saldo_terendah_minor: number; saldo_terendah_tanggal: string; tanggal_defisit: string | null } | null;
+  perlu_perhatian: Array<{ tipe: string; teks: string; tautan: string }>;
+  insight: Insight[];
+  mulai: { langkah: Array<{ kunci: string; label: string; selesai: boolean; tautan: string }>; selesai: boolean; ditutup: boolean };
+};
+
+export type KategoriFlat = {
+  id: number;
+  slug: string;
+  name: string;
+  group_name: string;
+  parent_id: number | null;
+  active: number;
+  icon: string | null;
+  sort_order: number;
+};
+
+export type KategoriNode = KategoriFlat & { jumlah_transaksi: number; anak: KategoriNode[] };
+
+export type MerchantRingkas = {
+  id: number;
+  name: string;
+  name_norm: string;
+  default_category_id: number | null;
+  kategori_bawaan: string | null;
+  alias: Array<{ id: number; alias_raw: string | null; source: string }>;
+  jumlah_transaksi: number;
+  total_pengeluaran_minor: number;
+  terakhir: string | null;
 };

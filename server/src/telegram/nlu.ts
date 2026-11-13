@@ -39,52 +39,53 @@ export type NluResult = {
   teks: string;
 };
 
-const PENGALI: Array<[RegExp, number]> = [
-  [/\b(\d+(?:[.,]\d+)?)\s*(?:jt|juta)\b/i, 1_000_000],
-  [/\b(\d+(?:[.,]\d+)?)\s*(?:rb|ribu|k)\b/i, 1_000],
-  [/\b(\d+(?:[.,]\d+)?)\s*(?:m|miliar|milyar)\b/i, 1_000_000_000],
-];
+/**
+ * Nominal bersatuan: "500 ribu", "Rp500 ribu", "1,5jt", "30k". Awalan "Rp" boleh menempel pada angka
+ * (tanpa batas kata di antaranya), sehingga "Rp500 ribu" terbaca 500.000, bukan 500.
+ */
+export const POLA_NOMINAL_SATUAN = /(?<![A-Za-z0-9])(?:rp\.?\s?)?(\d+(?:[.,]\d+)?)\s*(jt|juta|rb|ribu|k|m|miliar|milyar)\b/gi;
+const POLA_NOMINAL_RP = /(?<![A-Za-z0-9])rp\.?\s?([\d.]{3,})(?![\d.]*\d\s*(?:jt|juta|rb|ribu|k)\b)/gi;
 
-/** "30 ribu" -> 30000, "1,5jt" -> 1500000, "Rp25.000" -> 25000 */
-export function parseRupiah(text: string): number | null {
-  for (const [re, mult] of PENGALI) {
-    const m = text.match(re);
-    if (m?.[1]) {
-      const num = Number(m[1].replace(',', '.'));
-      if (Number.isFinite(num)) return Math.round(num * mult);
-    }
-  }
-  const rp = text.match(/\b(?:rp\.?\s?)([\d.]{3,})\b/i);
-  if (rp?.[1]) {
-    const digits = rp[1].replace(/\./g, '');
-    const num = Number(digits);
-    if (Number.isFinite(num)) return num;
-  }
-  const plain = text.match(/\b(\d{4,})\b/);
-  if (plain?.[1]) {
-    const num = Number(plain[1]);
-    if (Number.isFinite(num)) return num;
-  }
-  return null;
+function pengaliSatuan(unit: string): number {
+  const u = unit.toLowerCase();
+  if (u === 'jt' || u === 'juta') return 1_000_000;
+  if (u === 'm' || u === 'miliar' || u === 'milyar') return 1_000_000_000;
+  return 1_000;
 }
 
-/** Semua nominal yang muncul di teks, berurutan. */
+/** Hapus semua bentuk nominal dari teks (dipakai untuk mengambil nama dari sisa kalimat). */
+export function hapusNominal(teks: string): string {
+  return teks
+    .replace(new RegExp(POLA_NOMINAL_SATUAN.source, 'gi'), ' ')
+    .replace(new RegExp(POLA_NOMINAL_RP.source, 'gi'), ' ')
+    .replace(/(?<![A-Za-z0-9])\d{4,}(?![A-Za-z0-9])/g, ' ');
+}
+
+/** "30 ribu" -> 30000, "1,5jt" -> 1500000, "Rp25.000" -> 25000, "Rp500 ribu" -> 500000 */
+export function parseRupiah(text: string): number | null {
+  const semua = parseAllRupiah(text);
+  return semua.length ? semua[0]! : null;
+}
+
+/** Semua nominal yang muncul di teks, berurutan menurut posisi. */
 export function parseAllRupiah(text: string): number[] {
-  const out: number[] = [];
-  const re = /(\d+(?:[.,]\d+)?)\s*(jt|juta|rb|ribu|k)\b|(?:rp\.?\s?)([\d.]{3,})|\b(\d{4,})\b/gi;
+  const hit: Array<{ pos: number; nilai: number }> = [];
+  const ambilSatuan = new RegExp(POLA_NOMINAL_SATUAN.source, 'gi');
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m[1] && m[2]) {
-      const unit = m[2].toLowerCase();
-      const mult = unit.startsWith('j') ? 1_000_000 : 1_000;
-      out.push(Math.round(Number(m[1].replace(',', '.')) * mult));
-    } else if (m[3]) {
-      out.push(Number(m[3].replace(/\./g, '')));
-    } else if (m[4]) {
-      out.push(Number(m[4]));
-    }
+  while ((m = ambilSatuan.exec(text)) !== null) {
+    const nilai = Math.round(Number(m[1]!.replace(',', '.')) * pengaliSatuan(m[2]!));
+    if (Number.isFinite(nilai)) hit.push({ pos: m.index, nilai });
   }
-  return out;
+  const tanpaSatuan = text.replace(new RegExp(POLA_NOMINAL_SATUAN.source, 'gi'), (x) => ' '.repeat(x.length));
+  const ambilRp = new RegExp(POLA_NOMINAL_RP.source, 'gi');
+  while ((m = ambilRp.exec(tanpaSatuan)) !== null) {
+    const nilai = Number(m[1]!.replace(/\./g, ''));
+    if (Number.isFinite(nilai)) hit.push({ pos: m.index, nilai });
+  }
+  const tanpaRp = tanpaSatuan.replace(new RegExp(POLA_NOMINAL_RP.source, 'gi'), (x) => ' '.repeat(x.length));
+  const polos = /(?<![A-Za-z0-9])(\d{4,})(?![A-Za-z0-9])/g;
+  while ((m = polos.exec(tanpaRp)) !== null) hit.push({ pos: m.index, nilai: Number(m[1]) });
+  return hit.sort((a, b) => a.pos - b.pos).map((h) => h.nilai);
 }
 
 const ANGKA_KATA: Record<string, number> = {

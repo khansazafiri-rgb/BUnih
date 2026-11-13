@@ -20,6 +20,13 @@ export function useApi<T>(ambil: () => Promise<T>, deps: unknown[] = []): Keadaa
   const ambilRef = useRef(ambil);
   ambilRef.current = ambil;
 
+  // Data di halaman ini ikut diperbarui ketika sesuatu dicatat atau diubah dari mana pun.
+  useEffect(() => {
+    const dengar = () => setNonce((n) => n + 1);
+    window.addEventListener('bunih:diubah', dengar);
+    return () => window.removeEventListener('bunih:diubah', dengar);
+  }, []);
+
   useEffect(() => {
     let batal = false;
     setMemuat(true);

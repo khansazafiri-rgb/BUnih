@@ -1,13 +1,19 @@
 import type { Database as DB } from 'better-sqlite3';
 import { db } from '../db/index.js';
 import { formatIDR } from '../domain/money.js';
-import { addDays, formatTanggal, formatTanggalSingkat, nowIso, today } from '../domain/time.js';
+import { addDays, formatTanggal, formatTanggalSingkat, nowIso, startOfWeek, today } from '../domain/time.js';
+import { listBudgets } from '../domain/budgets.js';
+import { listGoals } from '../domain/goals.js';
 import { project } from '../domain/projection.js';
 import { tagihanMendekat, cancelledButCharged } from '../domain/services.js';
 import { listReceivables } from '../domain/receivables.js';
 import { listTopups } from '../domain/topup.js';
 import { syncState } from '../gmail/sync.js';
 import { esc } from '../telegram/format.js';
+import { balanceSummary } from '../domain/balances.js';
+import { rencanaUang, teksRencanaUang } from '../domain/rencanaUang.js';
+import type { Tombol } from '../telegram/ui/layar.js';
+import { ambilSnapshotDefisit, catatSnapshotDefisit, putuskanKirimDefisit, sedangDitahan, type KondisiDefisit } from './kontrol.js';
 
 export type Frekuensi = 'langsung' | 'harian' | 'mingguan' | 'mati';
 
@@ -16,6 +22,10 @@ export type Pengingat = {
   dedupe_key: string;
   text: string;
   prioritas: number;
+  /** Tombol aksi (Telegram inline keyboard) yang menyertai pengingat. */
+  tombol?: Tombol[][];
+  /** Data yang dicatat saat pengingat benar-benar terkirim (mis. snapshot kebijakan defisit). */
+  kondisiDefisit?: KondisiDefisit;
 };
 
 type Setting = { type: string; enabled: number; frequency: Frekuensi };
@@ -46,6 +56,7 @@ export function catatTerkirim(p: Pengingat, database: DB = db()): void {
       `INSERT OR IGNORE INTO notification_log (type, dedupe_key, sent_at, payload_json) VALUES (?, ?, ?, ?)`,
     )
     .run(p.type, p.dedupe_key, nowIso(), JSON.stringify({ text: p.text }));
+  if (p.kondisiDefisit) catatSnapshotDefisit(p.kondisiDefisit, database);
 }
 
 /**
@@ -83,29 +94,54 @@ export function kumpulkanPengingat(
     }
   }
 
-  // 2. Saldo proyeksi di bawah cadangan minimal
+  // 2. Saldo proyeksi di bawah cadangan minimal / defisit.
+  //    Kebijakan: maksimal satu per hari kecuali ada perubahan material; saldo yang belum terverifikasi
+  //    ditampilkan sebagai PERKIRAAN, bukan kondisi aktual. Lihat notify/kontrol.ts.
   if (aktif(map, 'saldo_di_bawah_cadangan', mode)) {
     const p = project({ dari: hariIni, sampai: addDays(hariIni, 30) }, database);
-    if (p.ringkasan.tanggal_defisit) {
-      out.push({
-        type: 'saldo_di_bawah_cadangan',
-        dedupe_key: `defisit:${p.ringkasan.tanggal_defisit}:${p.ringkasan.saldo_terendah_minor}`,
-        text:
-          `🔴 Proyeksi menunjukkan <b>defisit</b> pada ${formatTanggal(p.ringkasan.tanggal_defisit)}. ` +
-          `Saldo terendah ${formatIDR(p.ringkasan.saldo_terendah_minor)}. ` +
-          `Perlu tambahan ${formatIDR(p.ringkasan.kekurangan_agar_tidak_defisit_minor)} agar tidak minus.`,
-        prioritas: 1,
-      });
-    } else if (p.ringkasan.saldo_terendah_minor < p.ringkasan.cadangan_minimal_minor) {
-      out.push({
-        type: 'saldo_di_bawah_cadangan',
-        dedupe_key: `rendah:${p.ringkasan.saldo_terendah_tanggal}:${p.ringkasan.saldo_terendah_minor}`,
-        text:
-          `🟡 Saldo proyeksi turun ke ${formatIDR(p.ringkasan.saldo_terendah_minor)} pada ` +
-          `${formatTanggal(p.ringkasan.saldo_terendah_tanggal)}, di bawah cadangan minimal ` +
-          `${formatIDR(p.ringkasan.cadangan_minimal_minor)}.`,
-        prioritas: 2,
-      });
+    const terverifikasi = !p.risiko.some((r) => r.tipe === 'saldo_belum_terverifikasi') && balanceSummary(undefined, database).akun_terverifikasi > 0;
+    const defisit = p.ringkasan.tanggal_defisit;
+    const rendah = !defisit && p.ringkasan.saldo_terendah_minor < p.ringkasan.cadangan_minimal_minor;
+    if (defisit || rendah) {
+      const kondisi: KondisiDefisit = {
+        hari: hariIni,
+        jenis: defisit ? 'defisit' : 'rendah',
+        tanggalDefisit: defisit,
+        kekurangan_minor: defisit ? p.ringkasan.kekurangan_agar_tidak_defisit_minor : p.ringkasan.kekurangan_agar_cadangan_aman_minor,
+        terverifikasi,
+      };
+      const terakhir = ambilSnapshotDefisit(database);
+      const putusan = putuskanKirimDefisit(kondisi, terakhir);
+      if (putusan.kirim) {
+        const kepastian = terverifikasi ? 'Terverifikasi (saldo sudah dikonfirmasi)' : 'Perkiraan — saldo belum diverifikasi';
+        // Bukan "kekurangan Rp2 juta" (angka besar yang membingungkan), melainkan rencana yang bisa langsung dijalankan.
+        const tanggalMenipis = defisit ?? p.ringkasan.saldo_terendah_tanggal;
+        const r = rencanaUang(database, hariIni, tanggalMenipis);
+        const rencana = teksRencanaUang(r, esc, formatTanggalSingkat);
+        const urgensi = !terverifikasi ? 'Rendah' : r.status === 'kurang' ? 'Tinggi' : 'Sedang';
+        // Judul harus sejalan dengan isi rencana: "kurang" hanya bila 7 hari ke depan memang tidak tertutup.
+        const judul =
+          r.status === 'kurang'
+            ? '🔴 <b>Uang untuk 7 hari ke depan belum cukup</b>'
+            : defisit
+              ? '🟡 <b>Aman 7 hari ke depan, tetapi uangmu diperkirakan menipis setelahnya</b>'
+              : '🟡 <b>Saldo mendekati batas aman</b>';
+        out.push({
+          type: 'saldo_di_bawah_cadangan',
+          // Kunci memuat hari + urutan kiriman hari itu, BUKAN angka saldo: satu angka yang berubah tidak membuat peringatan baru.
+          dedupe_key: `defisit:${hariIni}:${(terakhir && terakhir.hari === hariIni ? terakhir.jumlahHariIni : 0) + 1}`,
+          text: terverifikasi
+            ? `${judul}\n\n${rencana}\n\nUrgensi: ${urgensi} · Kepastian: ${kepastian}`
+            : `🟡 <b>Perkiraan — saldo belum diverifikasi</b>\nIni <i>bukan kondisi keuangan aktual</i>: saldo dasar masih asumsi awal atau belum dikonfirmasi. Konfirmasi saldo rekeningmu agar rencana di bawah akurat.\n\n${rencana}\n\nUrgensi: ${urgensi} · Kepastian: ${kepastian}`,
+          prioritas: terverifikasi && r.status === 'kurang' ? 1 : terverifikasi ? 2 : 3,
+          kondisiDefisit: kondisi,
+          tombol: [
+            ...(terverifikasi ? [] : [[{ t: '💳 Konfirmasi Saldo', d: 'r:l' } as Tombol]]),
+            [{ t: '🔍 Lihat Penyebab', d: 'p:sebab' }, { t: '⏰ Ingatkan Nanti', d: 'p:tunda' }],
+            [{ t: '🔕 Bisukan 7 Hari', d: 'p:mute' }],
+          ],
+        });
+      }
     }
   }
 
@@ -195,6 +231,38 @@ export function kumpulkanPengingat(
     }
   }
 
+  // 7b. Anggaran yang berisiko atau terlewati. Satu pengingat per anggaran, per periode, per tingkat.
+  if (aktif(map, 'anggaran_berisiko', mode)) {
+    for (const b of listBudgets({ asOf: hariIni }, database)) {
+      if (b.status !== 'berisiko' && b.status !== 'lewat') continue;
+      out.push({
+        type: 'anggaran_berisiko',
+        dedupe_key: `anggaran:${b.id}:${b.jendela.dari}:${b.status}`,
+        text:
+          b.status === 'lewat'
+            ? `⛔ Anggaran <b>${esc(b.nama)}</b> sudah terlewati: terpakai ${formatIDR(b.terpakai_minor)} dari ${formatIDR(b.nominal_periode_minor + b.carry_minor)}.`
+            : `⚠️ Anggaran <b>${esc(b.nama)}</b> bisa terlewati kalau lajunya begini` +
+              (b.perkiraan_akhir_minor !== null ? ` (perkiraan akhir periode ${formatIDR(b.perkiraan_akhir_minor)}, ini estimasi)` : '') +
+              `. Sisa ${formatIDR(Math.max(0, b.sisa_minor))}.`,
+        prioritas: b.status === 'lewat' ? 2 : 3,
+      });
+    }
+  }
+
+  // 7c. Tujuan yang berisiko tidak tercapai tepat waktu (hanya yang pengingatnya dinyalakan).
+  if (aktif(map, 'tujuan_berisiko', mode)) {
+    for (const g of listGoals({ asOf: hariIni }, database)) {
+      if (!g.pengingat || g.status !== 'aktif') continue;
+      if (g.risiko !== 'berisiko' && g.risiko !== 'terlambat') continue;
+      out.push({
+        type: 'tujuan_berisiko',
+        dedupe_key: `tujuan:${g.id}:${g.risiko}:${startOfWeek(hariIni)}`,
+        text: `🎯 Tujuan <b>${esc(g.nama)}</b>: ${esc(g.penjelasan)}`,
+        prioritas: 4,
+      });
+    }
+  }
+
   // 8. Ringkasan harian
   if (aktif(map, 'ringkasan_harian', mode)) {
     const p = project({ dari: hariIni, sampai: addDays(hariIni, 14) }, database);
@@ -214,7 +282,7 @@ export function kumpulkanPengingat(
     }
   }
 
-  return out.sort((a, b) => a.prioritas - b.prioritas);
+  return out.filter((p) => !sedangDitahan(p.type, database)).sort((a, b) => a.prioritas - b.prioritas);
 }
 
 /**
@@ -273,4 +341,32 @@ export function setNotificationSetting(
 
 export function listNotificationSettings(database: DB = db()) {
   return database.prepare(`SELECT * FROM notification_setting ORDER BY type`).all();
+}
+
+/** Penjelasan "kenapa defisit?" untuk tombol Lihat Penyebab. Semua angka dari proyeksi yang sama. */
+export function penyebabDefisit(database: DB = db()): string {
+  const hariIni = today();
+  const p = project({ dari: hariIni, sampai: addDays(hariIni, 30) }, database);
+  const saldo = balanceSummary(undefined, database);
+  const terverifikasi = saldo.akun_terverifikasi > 0 && !p.risiko.some((r) => r.tipe === 'saldo_belum_terverifikasi');
+  const tgl = p.ringkasan.tanggal_defisit ?? p.ringkasan.saldo_terendah_tanggal;
+  const hari = p.hari.find((d) => d.tanggal === tgl);
+  const baris = [
+    '🔍 <b>Penyebab peringatan saldo</b>',
+    terverifikasi
+      ? `Saldo dasar: terverifikasi (${saldo.akun_terverifikasi} rekening dikonfirmasi).`
+      : '⚠️ Saldo dasar <b>belum terverifikasi</b> — hasilnya hanya perkiraan. Konfirmasi saldo di /rekening.',
+    `Saldo terendah: ${formatIDR(p.ringkasan.saldo_terendah_minor)} pada ${formatTanggal(p.ringkasan.saldo_terendah_tanggal)} (cadangan minimal ${formatIDR(p.ringkasan.cadangan_minimal_minor)}).`,
+    p.ringkasan.tanggal_defisit ? `Mulai minus: ${formatTanggal(p.ringkasan.tanggal_defisit)}.` : 'Belum ada hari yang minus.',
+  ];
+  if (hari) {
+    const besar = [...hari.drivers].filter((d) => d.direction === 'keluar' && d.amount_minor !== null).sort((a, b) => (b.amount_minor ?? 0) - (a.amount_minor ?? 0)).slice(0, 4);
+    if (besar.length) {
+      baris.push('', `<b>Pengeluaran terbesar pada ${formatTanggalSingkat(tgl)}</b>`, ...besar.map((d) => `• ${esc(d.label)} — ${formatIDR(d.amount_minor ?? 0)}`));
+    }
+  }
+  const risiko = p.risiko.slice(0, 3).map((r) => `• ${esc(r.pesan)}`);
+  if (risiko.length) baris.push('', '<b>Yang belum pasti</b>', ...risiko);
+  baris.push('', teksRencanaUang(rencanaUang(database, hariIni, p.ringkasan.tanggal_defisit ?? null), esc, formatTanggalSingkat));
+  return baris.join('\n');
 }

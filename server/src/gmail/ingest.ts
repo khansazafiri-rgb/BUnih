@@ -228,7 +228,9 @@ function ingestTransaction(
 ): void {
   const accounts = myAccounts(database);
   const sumberAkun = resolveAccount(tx.source_bank, tx.source_account_tail, database);
-  const tujuanAkun = resolveAccount(tx.dest_bank, tx.dest_account_tail, database);
+  const tujuanKandidat = resolveAccount(tx.dest_bank, tx.dest_account_tail, database);
+  // Rekening tujuan yang sama dengan rekening sumber bukan transfer: itu pembacaan yang keliru.
+  const tujuanAkun = tujuanKandidat && sumberAkun && tujuanKandidat.id === sumberAkun.id ? null : tujuanKandidat;
   const merchantNorm = normalizeMerchant(tx.merchant ?? tx.counterparty ?? null);
   const rule = applyMerchantRule(merchantNorm, database);
 
@@ -311,12 +313,14 @@ function ingestTransaction(
 
   if (!res.created) return;
 
-  // Pertanyaan yang perlu dijawab pengguna.
-  const perluTanya =
-    res.needs_decision ||
-    kind === 'belum_dikategorikan' ||
-    result.confidence < AMBANG_OTOMATIS ||
-    (rule !== null && !rule.auto);
+  // Setiap transaksi bank baru yang valid mendapat SATU notifikasi Telegram yang dapat ditindaklanjuti
+  // (kategori disarankan bila sudah dikenali). Pengecualian: perpindahan uang yang sudah dikenali
+  // sebagai transfer/tabungan sendiri, dan uang masuk yang cocok dengan piutang (pertanyaan pelunasan
+  // di bawah sudah menjadi notifikasinya, supaya tidak ada dua pesan untuk satu transaksi).
+  const gerakanInternal = ['transfer_internal', 'setoran_tabungan', 'penarikan_tabungan'].includes(kind);
+  const kandidatPiutang =
+    tx.direction === 'masuk' ? matchCandidates(tx.amount_minor, { toleransi: 1000 }, database) : [];
+  const perluTanya = !gerakanInternal && kandidatPiutang.length === 0;
 
   if (perluTanya) {
     const opsi = [
@@ -347,7 +351,7 @@ function ingestTransaction(
 
   // Uang masuk yang mungkin pelunasan piutang.
   if (tx.direction === 'masuk') {
-    const kandidat = matchCandidates(tx.amount_minor, { toleransi: 1000 }, database);
+    const kandidat = kandidatPiutang;
     if (kandidat.length) {
       const dibuat = createDecision(
         {

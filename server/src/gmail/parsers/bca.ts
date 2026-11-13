@@ -64,7 +64,7 @@ export const bcaParser: MailParser = {
       reference_no: findReference(text),
       source_account_tail: findAccountTail(text, ['Rekening', 'No\\.? Rekening', 'Account']),
       source_bank: 'BCA',
-      dest_account_tail: findAccountTail(text, ['Rekening Tujuan', 'Tujuan']),
+      dest_account_tail: findAccountTail(text, ['Rekening Tujuan', 'Tujuan'], { tanpaCadangan: true }),
       dest_bank: null,
       dest_name: null,
       dest_is_mine: null,

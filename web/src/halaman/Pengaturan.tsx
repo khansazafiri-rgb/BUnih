@@ -805,15 +805,23 @@ export default function Pengaturan() {
   return (
     <>
       <h1>Pengaturan</h1>
-      <p className="subjudul">Rekening, koneksi Gmail dan Telegram, impor data, notifikasi, dan keamanan.</p>
+      <p className="subjudul">Rekening, koneksi Gmail dan Telegram, impor mutasi bank, notifikasi, dan keamanan.</p>
 
       <BagianRekening />
       <BagianGmail />
       <BagianTelegram />
-      <BagianImporSheet />
       <BagianImporMutasi />
       <BagianNotifikasi />
       <BagianKeamanan />
+
+      <details className="kartu" style={{ marginTop: 14 }}>
+        <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Impor data lama dari Google Sheet (opsional)</summary>
+        <p className="kecil" style={{ margin: '8px 0 12px' }}>
+          BUnih tidak membutuhkan spreadsheet. Bagian ini hanya untuk membawa data lama bila kamu punya. Nilai yang sudah
+          kamu konfirmasi di BUnih tidak akan ditimpa.
+        </p>
+        <BagianImporSheet />
+      </details>
 
       <Kartu judul="Tampilan">
         <div className="bidang">

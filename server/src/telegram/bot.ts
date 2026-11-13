@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { db } from '../db/index.js';
 import { formatIDR } from '../domain/money.js';
 import { addDays, dateOf, formatTanggalSingkat, nowIso, today } from '../domain/time.js';
-import { recordCashEvent } from '../domain/ledger.js';
+import { recategorize, recordCashEvent } from '../domain/ledger.js';
 import { simulasiPembelian } from '../domain/simulate.js';
 import {
   applyDecision, bagiBiaya, jadikanCompanyLangsung, jadikanHadiah, jadikanReimburseCompany,
@@ -13,6 +13,16 @@ import {
 import { listDecisions, markSent, type DecisionRow } from '../domain/decisions.js';
 import { setTopupStatus } from '../domain/topup.js';
 import { detectIntent, parseRupiah } from './nlu.js';
+import {
+  adalahPermintaanBuatTujuan, adalahPertanyaanPengeluaran, adalahPertanyaanTujuan, jawabDariTombol,
+  jawabPertanyaanPengeluaran, parseTujuan, pertanyaanTujuan, ringkasanTujuan, simpanTujuan,
+  uraiMerchantProyek, type DraftTujuan, type Jawaban,
+} from './analitikBot.js';
+import { pasangUi } from './pasang.js';
+import { kirimNotifikasiTransaksi, notifikasiTransaksiAktif } from './notifTx.js';
+import { DAFTAR_PERINTAH } from './ui/lainUi.js';
+import { keKeyboard, type Tombol } from './ui/layar.js';
+import { clearState, getState, setState } from './state.js';
 import {
   bandingSkenario, bantuan, daftarTagihan, esc, hasilSimulasi, ringkasan5Hari, ringkasanAnggaran,
   ringkasanBulan, ringkasanHari, ringkasanMinggu, ringkasanReimburse, ringkasanTabungan,
@@ -24,7 +34,22 @@ type Percakapan =
   | { tipe: 'input_belanja' }
   | { tipe: 'konfirmasi_foto'; evidence_id: number };
 
-const percakapan = new Map<string, Percakapan>();
+/**
+ * Status percakapan lama (top-up, belanja, foto, bagi biaya) kini disimpan di SQLite supaya bertahan
+ * setelah restart. Antarmuka Map dipertahankan agar handler lama tidak perlu ditulis ulang.
+ */
+const percakapan = {
+  get(chatKey: string): Percakapan | undefined {
+    const st = getState(chatKey, 'utama');
+    return st && typeof st['tipe'] === 'string' ? (st as unknown as Percakapan) : undefined;
+  },
+  set(chatKey: string, nilai: Percakapan): void {
+    setState(chatKey, { ...nilai, t: nilai.tipe } as never, 'utama');
+  },
+  delete(chatKey: string): void {
+    clearState(chatKey, 'utama');
+  },
+};
 let bot: Bot | null = null;
 
 export function getBot(): Bot | null {
@@ -107,6 +132,12 @@ export async function sendPendingDecisions(limit = 5, database: DB = db()): Prom
   let terkirim = 0;
   for (const d of daftar) {
     try {
+      if (d.kind === 'kategori_transaksi' && d.cash_event_id) {
+        // Notifikasi transaksi baru yang interaktif; berdiri sendiri dari pengingat proyeksi.
+        if (!notifikasiTransaksiAktif(database)) continue;
+        if (await kirimNotifikasiTransaksi(b.api as never, chatId, d, database)) terkirim += 1;
+        continue;
+      }
       const msg = await b.api.sendMessage(chatId, `❓ ${esc(d.question)}`, {
         parse_mode: 'HTML',
         reply_markup: keyboardDariOpsi(d),
@@ -120,12 +151,12 @@ export async function sendPendingDecisions(limit = 5, database: DB = db()): Prom
   return terkirim;
 }
 
-export async function kirimPesan(text: string, database: DB = db()): Promise<boolean> {
+export async function kirimPesan(text: string, database: DB = db(), tombol?: Tombol[][]): Promise<boolean> {
   const b = bot;
   const chatId = allowedChatId();
   if (!b || !chatId) return false;
   try {
-    await b.api.sendMessage(chatId, text, { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
+    await b.api.sendMessage(chatId, text, { parse_mode: 'HTML', link_preview_options: { is_disabled: true }, reply_markup: keKeyboard(tombol) });
     return true;
   } catch {
     return false;
@@ -138,10 +169,10 @@ function catatPengeluaranCepat(
   label: string,
   tanggalRelatif: 'hari_ini' | 'kemarin' | null,
   database: DB,
+  tambahan: { merchant?: string | null; proyek?: string | null } = {},
 ): { id: number; pesan: string } {
-  const akun = database
-    .prepare(`SELECT id, name FROM account WHERE is_mine = 1 AND is_savings_target = 0 ORDER BY id LIMIT 1`)
-    .get() as { id: number; name: string } | undefined;
+  // Rekening sumber tidak diketahui dari teks/foto: JANGAN memilih rekening pertama. Tercatat tanpa rekening dan ditandai perlu verifikasi.
+  const akun: { id: number; name: string } | undefined = undefined;
   const kategori = kategoriSlug
     ? (database.prepare(`SELECT id FROM category WHERE slug = ?`).get(kategoriSlug) as
         | { id: number }
@@ -154,13 +185,15 @@ function catatPengeluaranCepat(
       occurred_at: `${tanggal}T${nowIso().slice(11, 19)}+07:00`,
       direction: 'keluar',
       amount_minor: nominal,
-      account_id: akun?.id ?? null,
-      is_cash: !akun,
+      account_id: null,
+      is_cash: false,
+      status: 'perlu_verifikasi',
       kind: 'pengeluaran_pribadi',
-      merchant_raw: label || null,
+      merchant_raw: tambahan.merchant || label || null,
+      project: tambahan.proyek ?? null,
       category_id: kategori?.id ?? null,
       source: 'telegram',
-      note: 'Dicatat manual lewat Telegram.',
+      note: 'Dicatat manual lewat Telegram. Rekening belum teridentifikasi.',
       actor: 'telegram',
     },
     database,
@@ -168,14 +201,32 @@ function catatPengeluaranCepat(
   return {
     id: res.id,
     pesan:
-      `Dicatat: ${formatIDR(nominal)}${label ? ` — ${label}` : ''} pada ${formatTanggalSingkat(tanggal)}` +
-      `${akun ? ` dari ${akun.name}` : ' (tunai)'}.`,
+      `Dicatat: ${formatIDR(nominal)}${tambahan.merchant || label ? ` — ${tambahan.merchant || label}` : ''}${tambahan.proyek ? ` #${tambahan.proyek}` : ''} pada ${formatTanggalSingkat(tanggal)}` +
+      ' (rekening belum teridentifikasi — pilih di /transaksi).',
   };
+}
+
+async function kirimJawaban(ctx: Context, j: Jawaban): Promise<void> {
+  if (j.pilihan && j.pilihan.length > 0) {
+    const kb = new InlineKeyboard();
+    j.pilihan.forEach((p, i) => {
+      kb.text(p.label, p.data);
+      if (i % 2 === 1) kb.row();
+    });
+    await ctx.reply(j.teks, { parse_mode: 'HTML', reply_markup: kb });
+    return;
+  }
+  await ctx.reply(j.teks, { parse_mode: 'HTML' });
 }
 
 export function createBot(): Bot | null {
   if (config.TELEGRAM_MODE === 'off' || !config.TELEGRAM_BOT_TOKEN) return null;
-  const b = new Bot(config.TELEGRAM_BOT_TOKEN);
+  return buatBot(config.TELEGRAM_BOT_TOKEN);
+}
+
+/** Membangun bot dari token tertentu. Dipakai juga oleh pengujian dengan transformer API palsu. */
+export function buatBot(token: string, botInfo?: ConstructorParameters<typeof Bot>[1] extends infer O ? (O extends { botInfo?: infer I } ? I : never) : never): Bot {
+  const b = new Bot(token, botInfo ? { botInfo } : undefined);
 
   // ---- Penjaga akses --------------------------------------------------
   b.use(async (ctx, next) => {
@@ -194,20 +245,14 @@ export function createBot(): Bot | null {
     await next();
   });
 
+  // ---- Antarmuka interaktif (menu, tombol, alur bertahap) ---------------
+  pasangUi(b);
+
   // ---- Perintah -------------------------------------------------------
-  b.command(['start', 'mulai'], async (ctx) => {
-    await ctx.reply(
-      'Halo. Aku BUnih, pencatat keuangan pribadimu.\n\n' +
-        'Kirim /hari untuk posisi hari ini, atau /bantuan untuk daftar kemampuan.',
-    );
-  });
-  b.command(['bantuan', 'help'], (ctx) => ctx.reply(bantuan(), { parse_mode: 'HTML' }));
   b.command('hari', (ctx) => ctx.reply(ringkasanHari(db()), { parse_mode: 'HTML' }));
   b.command('minggu', (ctx) => ctx.reply(ringkasanMinggu(db()), { parse_mode: 'HTML' }));
   b.command('bulan', (ctx) => ctx.reply(ringkasanBulan(undefined, db()), { parse_mode: 'HTML' }));
   b.command(['5hari', 'lima'], (ctx) => ctx.reply(ringkasan5Hari(db()), { parse_mode: 'HTML' }));
-  b.command('tagihan', (ctx) => ctx.reply(daftarTagihan(30, db()), { parse_mode: 'HTML' }));
-  b.command('anggaran', (ctx) => ctx.reply(ringkasanAnggaran(db()), { parse_mode: 'HTML' }));
   b.command('tabungan', (ctx) => ctx.reply(ringkasanTabungan(db()), { parse_mode: 'HTML' }));
   b.command('reimburse', (ctx) => ctx.reply(ringkasanReimburse(db()), { parse_mode: 'HTML' }));
   b.command('skenario', (ctx) => ctx.reply(bandingSkenario(db()), { parse_mode: 'HTML' }));
@@ -282,14 +327,18 @@ export function createBot(): Bot | null {
         await balasLanjutan(ctx, hasil.pesan, hasil.lanjutan, database);
         return;
       }
+      if (data.startsWith('an:')) {
+        const j = jawabDariTombol(data, database);
+        await ctx.answerCallbackQuery();
+        await kirimJawaban(ctx, j ?? { teks: 'Pilihan itu sudah tidak berlaku.' });
+        return;
+      }
       if (data.startsWith('cat:')) {
         const [, evId, catId] = data.split(':');
+        recategorize(Number(evId), { category_id: Number(catId) }, 'telegram', database);
         database
-          .prepare(`UPDATE cash_event SET category_id = ?, status = 'terkonfirmasi', updated_at = ? WHERE id = ?`)
-          .run(Number(catId), nowIso(), Number(evId));
-        database
-          .prepare(`UPDATE allocation SET category_id = ? WHERE cash_event_id = ? AND purpose = 'biaya_pribadi'`)
-          .run(Number(catId), Number(evId));
+          .prepare(`UPDATE cash_event SET status = 'terkonfirmasi', updated_at = ? WHERE id = ? AND status = 'perlu_verifikasi'`)
+          .run(nowIso(), Number(evId));
         await ctx.answerCallbackQuery({ text: 'Kategori diubah' });
         await ctx.reply('Kategori sudah diperbarui.');
         return;
@@ -487,6 +536,14 @@ export function createBot(): Bot | null {
 
     const nlu = detectIntent(teks);
     try {
+      if (adalahPertanyaanTujuan(teks)) {
+        await ctx.reply(ringkasanTujuan(database), { parse_mode: 'HTML' });
+        return;
+      }
+      if ((nlu.intent === 'tidak_jelas' || nlu.intent === 'tanya_hari') && adalahPertanyaanPengeluaran(teks)) {
+        await kirimJawaban(ctx, jawabPertanyaanPengeluaran(teks, database));
+        return;
+      }
       switch (nlu.intent) {
         case 'bantuan':
           await ctx.reply(bantuan(), { parse_mode: 'HTML' });
@@ -618,49 +675,6 @@ export function createBot(): Bot | null {
           }
           return;
         }
-        case 'catat_pemasukan': {
-          if (!nlu.nominal_minor) break;
-          const akun = database
-            .prepare(`SELECT id FROM account WHERE is_mine = 1 AND is_savings_target = 0 ORDER BY id LIMIT 1`)
-            .get() as { id: number } | undefined;
-          const res = recordCashEvent(
-            {
-              occurred_at: nowIso(),
-              direction: 'masuk',
-              amount_minor: nlu.nominal_minor,
-              account_id: akun?.id ?? null,
-              is_cash: !akun,
-              kind: 'pemasukan_luar',
-              merchant_raw: nlu.teks.slice(0, 80),
-              source: 'telegram',
-              actor: 'telegram',
-            },
-            database,
-          );
-          await ctx.reply(
-            `Pemasukan ${formatIDR(nlu.nominal_minor)} dicatat (#${res.id}).\n` +
-              'Kalau ini sebenarnya pelunasan piutang, balas "itu pelunasan piutang".',
-          );
-          return;
-        }
-        case 'catat_pengeluaran': {
-          if (!nlu.nominal_minor) break;
-          const hasil = catatPengeluaranCepat(
-            nlu.nominal_minor,
-            nlu.kategori_tebakan,
-            nlu.teks.slice(0, 80),
-            nlu.tanggal_relatif,
-            database,
-          );
-          const kb = new InlineKeyboard()
-            .text('Benar', `x:${hasil.id}:none`)
-            .text('Bagi biaya', `kk:${hasil.id}:bagi`)
-            .row()
-            .text('Reimburse company', `x:${hasil.id}:reimburse`)
-            .text('Hadiah', `x:${hasil.id}:hadiah`);
-          await ctx.reply(hasil.pesan, { reply_markup: kb });
-          return;
-        }
         default:
           break;
       }
@@ -743,21 +757,7 @@ export async function startBot(): Promise<void> {
     console.log('[telegram] bot tidak dijalankan (TELEGRAM_MODE=off atau token kosong).');
     return;
   }
-  await b.api.setMyCommands([
-    { command: 'hari', description: 'Posisi hari ini' },
-    { command: 'minggu', description: 'Rekap minggu ini' },
-    { command: 'bulan', description: 'Rekap bulan ini' },
-    { command: '5hari', description: 'Blok lima hari berjalan' },
-    { command: 'tagihan', description: 'Tagihan dan jatuh tempo' },
-    { command: 'anggaran', description: 'Pemakaian versus batas' },
-    { command: 'tabungan', description: 'Setoran dan saldo BCA' },
-    { command: 'reimburse', description: 'Piutang teman dan company' },
-    { command: 'belanja', description: 'Tambah pembelian' },
-    { command: 'simulasi', description: 'Bolehkah aku beli ini?' },
-    { command: 'skenario', description: 'Bandingkan skenario Claude' },
-    { command: 'koreksi', description: 'Perbaiki transaksi' },
-    { command: 'bantuan', description: 'Daftar kemampuan' },
-  ]);
+  await b.api.setMyCommands(DAFTAR_PERINTAH);
 
   if (config.TELEGRAM_MODE === 'webhook') {
     console.log('[telegram] mode webhook: pasang webhook lewat /api/telegram/webhook.');

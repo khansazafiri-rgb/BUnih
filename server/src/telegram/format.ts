@@ -6,6 +6,7 @@ import {
   endOfMonth, today, type IsoDate,
 } from '../domain/time.js';
 import { project } from '../domain/projection.js';
+import { listBudgets } from '../domain/budgets.js';
 import { periodReport } from '../domain/periods.js';
 import { balanceSummary } from '../domain/balances.js';
 import { tagihanMendekat } from '../domain/services.js';
@@ -14,6 +15,7 @@ import { savingsReport } from '../domain/savings.js';
 import { monthlyReport } from '../domain/reports.js';
 import { countOpenDecisions } from '../domain/decisions.js';
 import { bandingkanSkenario } from '../domain/simulate.js';
+import { slugPerbandinganBawaan } from '../domain/scenarios.js';
 import type { SimulasiHasil } from '../domain/simulate.js';
 import { DAY_RISK_LABEL } from '../domain/types.js';
 
@@ -25,7 +27,7 @@ const IKON_RISIKO: Record<string, string> = { aman: '🟢', rendah: '🟡', defi
 
 function labelKepastian(c: string): string {
   if (c === 'terverifikasi') return 'Aktual';
-  if (c === 'asumsi_sheet') return 'Asumsi Sheet';
+  if (c === 'asumsi_sheet') return 'Asumsi awal';
   return 'Perkiraan';
 }
 
@@ -202,6 +204,21 @@ export function daftarTagihan(hari = 30, database: DB = db()): string {
 
 export function ringkasanAnggaran(database: DB = db()): string {
   const hariIni = today();
+  const daftar = listBudgets({ asOf: hariIni }, database);
+  if (daftar.length > 0) {
+    const ikon = { aman: '✅', berisiko: '⚠️', lewat: '⛔', belum_mulai: '⏳', selesai: '✔️' } as const;
+    const baris = daftar.map((b) => {
+      const perkiraan =
+        b.perkiraan_akhir_minor !== null && b.status !== 'lewat'
+          ? `\n  perkiraan akhir periode (estimasi): ${formatIDR(b.perkiraan_akhir_minor)}`
+          : '';
+      return (
+        `${ikon[b.status]} <b>${esc(b.nama)}</b>: terpakai ${formatIDR(b.terpakai_minor)} dari ${formatIDR(b.nominal_periode_minor + b.carry_minor)}\n` +
+        `  sisa ${formatIDR(Math.max(0, b.sisa_minor))}${b.hari_tersisa > 0 ? `, cukup ${formatIDR(Math.max(0, b.sisa_per_hari_minor))} per hari untuk ${b.hari_tersisa} hari lagi` : ''}${perkiraan}`
+      );
+    });
+    return ['<b>Anggaran</b>', ...baris, '', 'Perkiraan adalah estimasi dari laju pemakaian, bukan pengeluaran yang sudah terjadi.'].join('\n');
+  }
   const awal = startOfMonth(hariIni);
   const p = project({ dari: awal, sampai: endOfMonth(hariIni) }, database);
   const sampaiHariIni = p.hari.filter((d) => d.tanggal <= hariIni);
@@ -298,8 +315,12 @@ export function hasilSimulasi(h: SimulasiHasil): string {
 }
 
 export function bandingSkenario(database: DB = db()): string {
-  const hasil = bandingkanSkenario(['tanpa-claude-pribadi', 'dengan-claude-pribadi'], {}, database);
-  const lines: string[] = ['<b>Dua skenario Claude</b>'];
+  const slugs = slugPerbandinganBawaan(database);
+  if (slugs.length < 2) {
+    return 'Belum ada skenario pembanding. Buat satu di web: Rencana → Skenario, misalnya "makan naik" atau "top-up terlambat".';
+  }
+  const hasil = bandingkanSkenario(slugs, {}, database);
+  const lines: string[] = ['<b>Perbandingan skenario</b>'];
   for (const h of hasil) {
     lines.push('');
     lines.push(`<b>${esc(h.nama)}</b>`);
@@ -327,12 +348,13 @@ export function bantuan(): string {
     '/minggu — rekap minggu ini',
     '/bulan — rekap bulan ini',
     '/5hari — posisi blok lima hari yang sedang berjalan',
-    '/skenario — bandingkan tanpa vs dengan Claude Pro pribadi',
+    '/skenario — bandingkan skenario rencana',
     '',
     '<b>Tagihan & anggaran</b>',
     '/tagihan — jatuh tempo, nominal, penanggung, dana yang perlu disiapkan',
     '/anggaran — pemakaian versus batas',
-    '/tabungan — setoran, penarikan, saldo BCA',
+    '/tabungan — setoran, penarikan, saldo rekening tabungan',
+    '/tujuan — progres tujuan keuanganmu',
     '/reimburse — siapa yang masih harus mengganti uangku',
     '',
     '<b>Catat & ubah</b>',
@@ -347,6 +369,10 @@ export function bantuan(): string {
     '• "transfer 500 ribu ke BCA aku" → setoran tabungan, bukan pengeluaran',
     '• "kalau aku beli hp 3 juta hari ini gimana?" → simulasi dampak',
     '• "top up hari ini tidak masuk" → rencana ditandai tidak diterima',
+    '• "makan 25 ribu di Kantin Kampus #skripsi" → dicatat dengan tempat dan proyek',
+    '• "berapa pengeluaran makan bulan ini?" → dijawab dari catatanmu, lengkap dengan pembandingnya',
+    '• "paling banyak habis buat apa minggu ini?" · "bandingkan bulan ini dengan bulan lalu"',
+    '• "buat tujuan laptop 8 juta 6 bulan lagi" → tujuan baru (bot bertanya bila ada yang kurang)',
     '',
     'Kirim foto kuitansi juga boleh — aku tampilkan hasil bacaannya dulu untuk kamu konfirmasi.',
   ].join('\n');

@@ -21,6 +21,8 @@ const schema = z.object({
   /** Kata sandi masuk web (satu pengguna). */
   BUNIH_WEB_PASSWORD: z.string().default(''),
   BUNIH_TIMEZONE: z.string().default('Asia/Jakarta'),
+  /** 'bersih' = instalasi baru tanpa spreadsheet (bawaan). 'warisan' = katalog dari Sheet lama. */
+  BUNIH_SEED_PROFILE: z.enum(['bersih', 'warisan']).default('bersih'),
 
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),

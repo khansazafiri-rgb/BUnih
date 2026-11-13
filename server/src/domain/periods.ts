@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { addDays, minDate, today, type IsoDate } from './time.js';
 import { assumptionAt, numberAssumption } from './assumptions.js';
 import { project, type DayRow, type Projection } from './projection.js';
+import { resolveScenario } from './scenarios.js';
 import type { DayRisk } from './types.js';
 
 export type PeriodBlock = {
@@ -113,7 +114,7 @@ export function periodReport(
         `${panjang} hari dapat dibentuk otomatis.`,
       panjang_hari: panjang,
       mulai_dari: null,
-      skenario: { slug: opts.skenario ?? 'tanpa-claude-pribadi', nama: '-' },
+      skenario: { slug: resolveScenario(opts.skenario, database).slug, nama: resolveScenario(opts.skenario, database).name },
       blok: [],
       berjalan: null,
     };

@@ -86,6 +86,8 @@ bash deploy/scripts/kesehatan.sh                             # periksa
 | [docs/06-pasang-tencent.md](docs/06-pasang-tencent.md) | **Langkah pemasangan ke server** |
 | [docs/07-operasional.md](docs/07-operasional.md) | Cadangan, pemulihan, pembaruan, pemantauan |
 | [docs/08-pertanyaan.md](docs/08-pertanyaan.md) | **Yang masih perlu kamu konfirmasi** |
+| [docs/09-v2-audit-dan-rilis.md](docs/09-v2-audit-dan-rilis.md) | **v2: audit, migrasi, rilis, rollback, batasan** |
+| [docs/10-telegram-first.md](docs/10-telegram-first.md) | **Telegram-first: notifikasi interaktif, kategori kustom, menu, rencana 7 hari, rollback** |
 
 ---
 

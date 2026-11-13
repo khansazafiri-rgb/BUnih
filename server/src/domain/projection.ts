@@ -4,6 +4,7 @@ import { addDays, dateOf, eachDay, maxDate, today, type IsoDate } from './time.j
 import { assumptionAt, numberAssumption } from './assumptions.js';
 import { resolveScenario, SKENARIO_DASAR, type ResolvedScenario } from './scenarios.js';
 import { balanceSummary } from './balances.js';
+import { dailyEquivalentForCategory } from './budgets.js';
 import type { Certainty, DayRisk } from './types.js';
 
 export type Bucket =
@@ -477,11 +478,23 @@ export function project(opts: ProjectionOptions = {}, database: DB = db()): Proj
     });
   }
 
+  /**
+   * Rencana makan per hari. Satu sumber kebenaran: bila ada anggaran makan aktif, anggaran itulah
+   * yang dipakai (setara harian). Override skenario tetap menang; asumsi lama menjadi cadangan.
+   */
+  const makanPerHari = (d: IsoDate) => {
+    const dasar = readNumber('anggaran_makan_harian', 0, d, scenario, database);
+    if (dasar.dari_skenario) return dasar;
+    const dariAnggaran = dailyEquivalentForCategory('makan', d, database);
+    if (dariAnggaran === null) return dasar;
+    return { value: dariAnggaran, certainty: 'terverifikasi' as Certainty, dari_skenario: false };
+  };
+
   // Rencana makan
   for (const d of days) {
     const day = byDay.get(d);
     if (!day) continue;
-    const makan = readNumber('anggaran_makan_harian', 0, d, scenario, database);
+    const makan = makanPerHari(d);
     day.anggaran_makan_minor = makan.value;
 
     if (d < hariIni) {
@@ -508,7 +521,7 @@ export function project(opts: ProjectionOptions = {}, database: DB = db()): Proj
       });
     }
   }
-  const makanHariIni = readNumber('anggaran_makan_harian', 0, hariIni, scenario, database);
+  const makanHariIni = makanPerHari(hariIni);
   asumsiDipakai.push({
     key: 'anggaran_makan_harian',
     value: makanHariIni.value,
@@ -655,7 +668,7 @@ export function project(opts: ProjectionOptions = {}, database: DB = db()): Proj
           tipe: 'nominal_belum_terverifikasi',
           tanggal: dueAsli,
           nominal_minor: amount,
-          pesan: `Nominal ${label} masih ${certainty === 'asumsi_sheet' ? 'asumsi Sheet' : 'perkiraan'}.`,
+          pesan: `Nominal ${label} masih ${certainty === 'asumsi_sheet' ? 'asumsi awal' : 'perkiraan'}.`,
           ref: { tipe: 'obligation', id: Number(o['id']) },
         },
         `nominal:${o['service_id'] ?? label}`,
