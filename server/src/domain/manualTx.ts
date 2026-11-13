@@ -24,6 +24,8 @@ export type TransaksiBaru = {
   waktu?: string;
   rekening_id?: number | null;
   tunai?: boolean;
+  /** Rekening sumber memang belum diketahui: tercatat tanpa rekening dan ditandai perlu verifikasi (bukan tunai). */
+  rekening_belum_jelas?: boolean;
   merchant?: string | null;
   kategori_id?: number | null;
   catatan?: string | null;
@@ -158,10 +160,10 @@ export function buatTransaksi(
 
     /* ----------------------------------------------------------- pemasukan */
     if (input.jenis === 'pemasukan') {
-      const akun = input.tunai ? null : akunSaya(database, input.rekening_id);
-      if (!akun && !input.tunai) throw new TransaksiError('Pilih rekening penerima atau tandai tunai.');
+      const akun = input.tunai || input.rekening_belum_jelas ? null : akunSaya(database, input.rekening_id);
+      if (!akun && !input.tunai && !input.rekening_belum_jelas) throw new TransaksiError('Pilih rekening penerima atau tandai tunai.');
       const res = recordCashEvent(
-        { ...dasar, direction: 'masuk', amount_minor: input.jumlah_minor, account_id: akun?.id ?? null, is_cash: !akun, kind: 'pemasukan_luar', category_id: input.kategori_id ?? null },
+        { ...dasar, direction: 'masuk', amount_minor: input.jumlah_minor, account_id: akun?.id ?? null, is_cash: !akun && !input.rekening_belum_jelas, kind: 'pemasukan_luar', category_id: input.kategori_id ?? null, ...(input.rekening_belum_jelas ? { status: 'perlu_verifikasi' as const } : {}) },
         database,
       );
       const pesan = [...res.pesan];
@@ -174,10 +176,10 @@ export function buatTransaksi(
 
     /* ----------------------------------------------------------- refund */
     if (input.jenis === 'refund') {
-      const akun = input.tunai ? null : akunSaya(database, input.rekening_id);
-      if (!akun && !input.tunai) throw new TransaksiError('Pilih rekening penerima atau tandai tunai.');
+      const akun = input.tunai || input.rekening_belum_jelas ? null : akunSaya(database, input.rekening_id);
+      if (!akun && !input.tunai && !input.rekening_belum_jelas) throw new TransaksiError('Pilih rekening penerima atau tandai tunai.');
       const res = recordCashEvent(
-        { ...dasar, direction: 'masuk', amount_minor: input.jumlah_minor, account_id: akun?.id ?? null, is_cash: !akun, kind: 'refund', category_id: input.kategori_id ?? null },
+        { ...dasar, direction: 'masuk', amount_minor: input.jumlah_minor, account_id: akun?.id ?? null, is_cash: !akun && !input.rekening_belum_jelas, kind: 'refund', category_id: input.kategori_id ?? null, ...(input.rekening_belum_jelas ? { status: 'perlu_verifikasi' as const } : {}) },
         database,
       );
       return { id: res.id, ids: [res.id], dibuat: res.created, pesan: [...res.pesan, 'Refund mengurangi pengeluaran, bukan menambah pemasukan.'] };
@@ -186,8 +188,8 @@ export function buatTransaksi(
     /* ----------------------------------------------------------- pengeluaran */
     const penanggung: Penanggung = input.penanggung ?? 'saya';
     const langsung = penanggung === 'company_langsung';
-    const akun = langsung || input.tunai ? null : akunSaya(database, input.rekening_id);
-    if (!akun && !langsung && !input.tunai) throw new TransaksiError('Pilih rekening pembayar atau tandai tunai.');
+    const akun = langsung || input.tunai || input.rekening_belum_jelas ? null : akunSaya(database, input.rekening_id);
+    if (!akun && !langsung && !input.tunai && !input.rekening_belum_jelas) throw new TransaksiError('Pilih rekening pembayar atau tandai tunai.');
 
     const adaOrang = (input.orang?.length ?? 0) > 0;
     const adaSplit = (input.pembagian_kategori?.length ?? 0) > 0;
@@ -269,11 +271,11 @@ export function buatTransaksi(
         direction: 'keluar',
         amount_minor: input.jumlah_minor,
         account_id: akun?.id ?? null,
-        is_cash: !akun && !langsung,
+        is_cash: !akun && !langsung && !input.rekening_belum_jelas,
         kind,
         category_id: input.kategori_id ?? (adaSplit ? (input.pembagian_kategori![0]?.kategori_id ?? null) : null),
         allocations,
-        status: 'terkonfirmasi',
+        status: input.rekening_belum_jelas ? 'perlu_verifikasi' : 'terkonfirmasi',
       },
       database,
     );

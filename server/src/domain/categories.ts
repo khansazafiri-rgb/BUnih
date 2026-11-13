@@ -122,6 +122,17 @@ function pastikanTanpaLingkaran(id: number, indukBaru: number | null, database: 
   }
 }
 
+/** Perbandingan nama tanpa memedulikan kapitalisasi, spasi, aksen, atau tanda baca. */
+function kunciNama(n: string): string {
+  return n.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function namaSudahDipakai(nama: string, kecuali: number | null, database: DB): boolean {
+  const k = kunciNama(nama);
+  const rows = database.prepare(`SELECT id, name FROM category WHERE active = 1`).all() as Array<{ id: number; name: string }>;
+  return rows.some((r) => r.id !== kecuali && kunciNama(r.name) === k);
+}
+
 export function createCategory(
   input: {
     name: string;
@@ -135,10 +146,7 @@ export function createCategory(
 ): number {
   const nama = input.name.trim().replace(/\s+/g, ' ');
   if (nama.length < 2) throw new CategoryError('Nama kategori minimal 2 huruf.');
-  const sama = database
-    .prepare(`SELECT id FROM category WHERE lower(name) = lower(?) AND active = 1`)
-    .get(nama);
-  if (sama) throw new CategoryError('Sudah ada kategori aktif dengan nama itu.');
+  if (namaSudahDipakai(nama, null, database)) throw new CategoryError('Sudah ada kategori aktif dengan nama itu.');
 
   let induk: CategoryRow | undefined;
   if (input.parent_id !== undefined && input.parent_id !== null) {
@@ -203,10 +211,7 @@ export function updateCategory(
     if (patch.name !== undefined) {
       const nama = patch.name.trim().replace(/\s+/g, ' ');
       if (nama.length < 2) throw new CategoryError('Nama kategori minimal 2 huruf.');
-      const sama = database
-        .prepare(`SELECT id FROM category WHERE lower(name) = lower(?) AND active = 1 AND id <> ?`)
-        .get(nama, id);
-      if (sama) throw new CategoryError('Sudah ada kategori aktif dengan nama itu.');
+      if (namaSudahDipakai(nama, id, database)) throw new CategoryError('Sudah ada kategori aktif dengan nama itu.');
       patch.name = nama;
     }
 

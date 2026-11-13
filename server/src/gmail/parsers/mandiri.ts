@@ -107,7 +107,7 @@ export const mandiriParser: MailParser = {
     ]);
     const destTail = findAccountTail(text, [
       'Rekening Tujuan', 'No\\.? Rekening Tujuan', 'Nomor Tujuan', 'Rekening Penerima',
-    ]);
+    ], { tanpaCadangan: true });
 
     const jenis = tebakJenis(hay);
     const tx: ParsedTransaction = {

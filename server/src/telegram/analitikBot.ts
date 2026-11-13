@@ -15,7 +15,7 @@ import { normalizeMerchant } from '../domain/merchantNorm.js';
 import { formatIDR } from '../domain/money.js';
 import { addDays, addMonths, endOfMonth, isValidDate, today, type IsoDate } from '../domain/time.js';
 import { esc } from './format.js';
-import { parseRupiah } from './nlu.js';
+import { hapusNominal, parseRupiah } from './nlu.js';
 
 /* ------------------------------------------------------------------ waktu */
 
@@ -283,7 +283,12 @@ export function jawabDariTombol(data: string, database: DB, hariIni: IsoDate = t
 
 export function adalahPermintaanBuatTujuan(teks: string): boolean {
   const t = teks.toLowerCase();
-  return /\b(buat|bikin|tambah|tambahkan|mulai)\b.*\b(tujuan|target|celengan)\b/.test(t) || /\b(mau|pengen|ingin)\s+(?:nabung|menabung)\s+(?:untuk|buat)\b/.test(t);
+  return (
+    /\b(buat|bikin|tambah|tambahkan|mulai)\b.*\b(tujuan|target|celengan)\b/.test(t) ||
+    /\b(mau|pengen|ingin)\s+(?:nabung|menabung)\s+(?:untuk|buat)\b/.test(t) ||
+    // "Target laptop Rp8 juta sebelum Juni 2027"
+    /^\s*(?:target|tujuan)\s+[a-z]/.test(t)
+  );
 }
 
 export function adalahPertanyaanTujuan(teks: string): boolean {
@@ -323,12 +328,10 @@ export type DraftTujuan = { nama: string | null; target_minor: number | null; ta
 export function parseTujuan(teks: string, hariIni: IsoDate = today()): DraftTujuan {
   const target = parseRupiah(teks.toLowerCase());
   const tanggal = parseTanggalTarget(teks, hariIni);
-  let nama = teks
+  let nama = hapusNominal(teks)
     .replace(/\b(buat|bikin|tambah|tambahkan|mulai)\b/gi, ' ')
     .replace(/\b(tujuan|target|celengan|tabungan|baru)\b/gi, ' ')
     .replace(/\b(mau|pengen|ingin)\s+(?:nabung|menabung)\s+(?:untuk|buat)\b/gi, ' ')
-    .replace(/\b(\d+(?:[.,]\d+)?)\s*(?:jt|juta|rb|ribu|k)\b/gi, ' ')
-    .replace(/\b(?:rp\.?\s?)[\d.]+/gi, ' ')
     .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ')
     .replace(/\b(?:dalam|sekitar)?\s*\d{1,2}\s*(?:bulan|minggu)\s*(?:lagi|ke ?depan)?\b/gi, ' ')
     .replace(/\b(?:sampai|sebelum|pada|di|bulan)\s+(?:januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)(?:\s+\d{4})?\b/gi, ' ')
@@ -386,7 +389,7 @@ export function uraiMerchantProyek(teks: string): Terurai {
   const tag = teks.match(/(?:#|\bproyek\s+)([\p{L}\p{N}_-]{2,30})/iu);
   if (tag?.[1]) proyek = tag[1].toLowerCase();
   let sisa = teks.replace(/#[\p{L}\p{N}_-]+/giu, ' ');
-  const di = sisa.match(/\b(?:di|ke|dari|beli di)\s+([^,.;\d][^,.;]*?)(?=\s+(?:kemarin|tadi|hari ini|proyek|untuk|buat|sama|bareng|rp|\d)|[,.;]|$)/i);
+  const di = sisa.match(/\b(?:di|ke|dari|beli di)\s+([^,.;\d][^,.;]*?)(?=\s+(?:kemarin|tadi|hari ini|proyek|untuk|buat|sama|bareng|pakai|pake|via|lewat|dengan|rp|\d)|[,.;]|$)/i);
   let merchant: string | null = null;
   if (di?.[1]) {
     const m = di[1].trim().replace(/\s+/g, ' ');

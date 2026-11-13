@@ -122,7 +122,8 @@ export function findReference(text: string): string | null {
     if (cleaned.length >= 4) return cleaned;
   }
   const loose = text.match(/\b(?:ref|trx|inv)[-_ ]?([A-Z0-9]{6,})\b/i);
-  return loose?.[1] ?? null;
+  // Harus memuat angka: kata "Referensi" sendiri tidak boleh terbaca sebagai nomor referensi ("erensi").
+  return loose?.[1] && /\d/.test(loose[1]) ? loose[1] : null;
 }
 
 export function findInvoiceNo(text: string): string | null {
@@ -154,8 +155,12 @@ export function findPeriod(text: string): { start: IsoDate | null; end: IsoDate 
 }
 
 /** Ambil 4 digit terakhir rekening dari pola "****1234" atau "xxxx1234". */
-export function findAccountTail(text: string, labels: string[]): string | null {
+export function findAccountTail(text: string, labels: string[], opsi: { tanpaCadangan?: boolean } = {}): string | null {
   const raw = labelValue(text, labels);
+  // Tanpa label, mencari di seluruh teks hanya aman untuk rekening SUMBER (satu-satunya nomor di email).
+  // Untuk rekening TUJUAN, jatuh ke seluruh teks akan menangkap nomor rekening sumber dan mengubah
+  // pembayaran ke merchant menjadi "transfer ke rekening sendiri".
+  if (raw === null && opsi.tanpaCadangan) return null;
   const target = raw ?? text;
   const masked = target.match(/(?:[*xX•]{2,}|\.{3,})\s?(\d{3,4})\b/);
   if (masked?.[1]) return masked[1].slice(-4);

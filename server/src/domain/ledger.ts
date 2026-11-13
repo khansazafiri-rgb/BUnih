@@ -800,6 +800,26 @@ export function recategorize(
     const ubahKategori = Object.prototype.hasOwnProperty.call(patch, 'category_id');
     const kategoriBaru = ubahKategori ? (patch.category_id ?? null) : before.category_id;
 
+    // Uang keluar yang belum diklasifikasi hanya punya potongan "penyesuaian" (tidak dihitung sebagai
+    // pengeluaran). Memberinya kategori berarti pengguna menyatakan ini pengeluaran pribadi; tanpa ini,
+    // kategori yang dipilih tidak pernah muncul di laporan.
+    if (
+      ubahKategori && kategoriBaru !== null && patch.kind === undefined &&
+      before.kind === 'belum_dikategorikan' && before.direction === 'keluar'
+    ) {
+      patch = { ...patch, kind: 'pengeluaran_pribadi' };
+      const pecah = database.prepare(`SELECT COUNT(*) AS n FROM allocation WHERE cash_event_id = ?`).get(cashEventId) as { n: number };
+      const semuaPenyesuaian = (database.prepare(`SELECT COUNT(*) AS n FROM allocation WHERE cash_event_id = ? AND purpose <> 'penyesuaian'`).get(cashEventId) as { n: number }).n === 0;
+      if (pecah.n >= 1 && semuaPenyesuaian) {
+        resplitCashEvent(
+          cashEventId,
+          [{ amount_minor: before.amount_minor, purpose: 'biaya_pribadi', bearer_type: 'saya', category_id: kategoriBaru }],
+          actor,
+          database,
+        );
+      }
+    }
+
     database
       .prepare(
         `UPDATE cash_event SET
