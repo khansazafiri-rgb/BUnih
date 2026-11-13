@@ -17,6 +17,7 @@ import { getCategory } from '../../domain/categories.js';
 import { buatTransaksi, TransaksiError, type TransaksiBaru } from '../../domain/manualTx.js';
 import { formatIDR } from '../../domain/money.js';
 import { rebuildObligations } from '../../domain/obligations.js';
+import { tandaiTopupDiterima } from '../../domain/topup.js';
 import { addDays, formatTanggal, today } from '../../domain/time.js';
 import { esc } from '../format.js';
 import { cariKategori, uraiMerchantProyek } from '../analitikBot.js';
@@ -43,6 +44,8 @@ export type DraftCatat = TgState & {
   tanggal?: string | null;
   /** Dari kalimat bebas: kategori ditebak, bukan dipilih pengguna. */
   ditebak?: boolean;
+  topup?: boolean;
+  konfirmasiDuplikat?: boolean;
 };
 
 const JUDUL: Record<JenisCatat, string> = {
@@ -55,6 +58,19 @@ const JUDUL: Record<JenisCatat, string> = {
 const SLOT = 'catat';
 const kapital = (s: string) => s.replace(/\b\p{L}/gu, (c) => c.toUpperCase());
 const tombolBatal: Tombol = tombolData('❌ Batalkan', 'c:x');
+
+/** /topup [nominal]: input uang masuk tanpa menebak rekening atau menganggap rencana sebagai uang nyata. */
+export function mulaiTopup(argumen: string, ctx: Konteks, database: DB = db()): Hasil {
+  hapusDraft(ctx, database);
+  const t = argumen.trim().toLowerCase();
+  const nominal = parseRupiah(t) ?? (/^\d{3,}$/.test(t) ? Number(t) : null);
+  const d: DraftCatat = {
+    t: 'catat', jenis: 'pemasukan', step: 'nominal', topup: true,
+    merchant: 'Top-up',
+    ...(nominal && Number.isSafeInteger(nominal) && nominal > 0 ? { nominal } : {}),
+  };
+  return { baru: true, ...langkahBerikut(d, ctx, database) };
+}
 
 export function getDraft(ctx: Konteks, database: DB = db()): DraftCatat | null {
   const st = getState(ctx.chatId, SLOT, database);
@@ -357,6 +373,31 @@ export function setelahKategoriBaru(kategoriId: number, ctx: Konteks, database: 
 }
 
 function simpan(d: DraftCatat, ctx: Konteks, database: DB): Hasil {
+  // Hindari pencatatan ganda jika bank sudah mengirim email masuk ke rekening yang sama.
+  // Nominal/tanggal saja hanya kandidat: pengguna memutuskan jika dua top-up memang identik.
+  if (d.topup && !d.konfirmasiDuplikat && d.rekeningId && d.nominal) {
+    const kandidat = database.prepare(`
+      SELECT id FROM cash_event WHERE direction = 'masuk' AND status <> 'dibatalkan'
+        AND account_id = ? AND amount_minor = ?
+        AND date(occurred_at) = ?
+      ORDER BY id DESC LIMIT 1
+    `).get(d.rekeningId, d.nominal, d.tanggal ?? today()) as { id: number } | undefined;
+    if (kandidat) {
+      d.konfirmasiDuplikat = true;
+      simpanDraft(ctx, d, database);
+      return {
+        layar: {
+          teks: `⚠️ Sudah ada uang masuk ${esc(formatIDR(d.nominal))} di rekening dan tanggal yang sama (transaksi #${kandidat.id}).\nApakah ini top-up yang sama? Jangan catat dua kali.`,
+          tombol: [
+            [tombolData('✅ Gunakan transaksi ini', `t:j:${kandidat.id}:topup`)],
+            [tombolData('➕ Top-up lain, tetap simpan', 'c:ok')],
+            [tombolBatal],
+          ],
+        },
+      };
+    }
+  }
+
   // Idempoten terhadap tekan ganda: draft dihapus sebelum menyimpan; tekan kedua melihat "sesi berakhir".
   hapusDraft(ctx, database);
   const waktu = d.tanggal ? `${d.tanggal}T12:00` : undefined;
@@ -368,6 +409,7 @@ function simpan(d: DraftCatat, ctx: Konteks, database: DB): Hasil {
     tunai: d.tunai ?? false,
     rekening_belum_jelas: d.belumJelas ?? false,
     merchant: d.merchant ?? null,
+    catatan: d.topup ? 'Top-up diterima (dikonfirmasi manual via Telegram).' : null,
     kategori_id: d.kategoriId ?? null,
     proyek: d.proyek ?? null,
     tujuan_rekening_id: d.tujuanId ?? null,
@@ -375,11 +417,12 @@ function simpan(d: DraftCatat, ctx: Konteks, database: DB): Hasil {
   };
   try {
     const hasil = buatTransaksi(dasar, 'telegram', database);
+    const topup = d.topup ? tandaiTopupDiterima(hasil.id, 'telegram', database) : null;
     try { rebuildObligations({}, database); } catch { /* proyeksi dibangun ulang pada siklus berikutnya */ }
     return {
       toast: 'Tersimpan',
       layar: {
-        teks: `✅ <b>Tersimpan</b> (#${hasil.id})\n${hasil.pesan.map(esc).join('\n')}`.trim(),
+        teks: `✅ <b>Tersimpan</b> (#${hasil.id})\n${hasil.pesan.map(esc).join('\n')}${topup ? `\n${esc(topup.pesan)}` : ''}`.trim(),
         tombol: [[tombolData('📄 Lihat & Ubah', `t:v:${hasil.id}`)], [tombolData('➕ Catat Lagi', 'c:menu'), MENU_UTAMA]],
       },
     };
