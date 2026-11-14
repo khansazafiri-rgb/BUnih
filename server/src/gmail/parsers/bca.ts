@@ -43,8 +43,9 @@ export const bcaParser: MailParser = {
       };
     }
 
-    const masuk = /(kredit|dana masuk|uang masuk|transfer masuk|cr\b)/.test(hay);
-    const keluar = /(debet|debit|uang keluar|pembayaran|transfer keluar|db\b)/.test(hay);
+    // Frasa eksplisit dana diterima lebih kuat daripada kata umum seperti 'pembayaran'.
+    const masuk = /(dana masuk|uang masuk|transfer masuk|dana diterima|rekening dikredit|saldo bertambah|\bkredit\b|\bcr\b)/.test(hay);
+    const keluar = /(debet|debit|uang keluar|pembayaran berhasil|transfer keluar|\bdb\b)/.test(hay);
     const direction: 'masuk' | 'keluar' = masuk && !keluar ? 'masuk' : 'keluar';
     if (masuk === keluar) catatan.push('Arah uang pada notifikasi BCA tidak jelas — perlu dikonfirmasi.');
 
@@ -58,14 +59,16 @@ export const bcaParser: MailParser = {
       direction,
       amount_minor: amount.minor,
       currency: amount.currency,
-      kind: 'belum_dikategorikan',
+      kind: direction === 'masuk' && masuk && !keluar ? 'pemasukan_luar' : 'belum_dikategorikan',
       merchant: labelValue(text, ['Keterangan', 'Berita', 'Remark', 'Merchant', 'Penerima']),
       counterparty: labelValue(text, ['Penerima', 'Pengirim', 'Nama']),
       reference_no: findReference(text),
-      source_account_tail: findAccountTail(text, ['Rekening', 'No\\.? Rekening', 'Account']),
-      source_bank: 'BCA',
-      dest_account_tail: findAccountTail(text, ['Rekening Tujuan', 'Tujuan'], { tanpaCadangan: true }),
-      dest_bank: null,
+      source_account_tail: direction === 'masuk' ? null : findAccountTail(text, ['Rekening', 'No\\.? Rekening', 'Account']),
+      source_bank: direction === 'masuk' ? null : 'BCA',
+      dest_account_tail: direction === 'masuk'
+        ? findAccountTail(text, ['Rekening Penerima', 'Rekening Dikredit', 'Rekening', 'No\\.? Rekening', 'Account'], { tanpaCadangan: true })
+        : findAccountTail(text, ['Rekening Tujuan', 'Tujuan'], { tanpaCadangan: true }),
+      dest_bank: direction === 'masuk' ? 'BCA' : null,
       dest_name: null,
       dest_is_mine: null,
       note: catatan.length ? catatan.join(' ') : null,

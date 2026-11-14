@@ -2,6 +2,7 @@ import type { Database as DB } from 'better-sqlite3';
 import { db } from '../db/index.js';
 import { nowIso, today, type IsoDate } from './time.js';
 import { writeAudit } from './audit.js';
+import { getCashEvent, recategorize, resplitCashEvent } from './ledger.js';
 import { closeDecisionsFor, createDecision } from './decisions.js';
 import { formatIDR } from './money.js';
 import type { TopupStatus } from './types.js';
@@ -112,4 +113,60 @@ export function tanyakanTopupLewat(database: DB = db()): number {
     if (id) dibuat += 1;
   }
   return dibuat;
+}
+
+/**
+ * Pengguna mengonfirmasi bahwa sebuah transaksi UANG MASUK merupakan top-up.
+ * Satu peristiwa kas tetap satu peristiwa: hanya jenis/alokasinya diperbarui.
+ * Rencana lama baru ditandai diterima jika ada tepat SATU kandidat yang
+ * cocok pada nominal, rekening, dan tanggal (±3 hari).
+ */
+export function tandaiTopupDiterima(
+  cashEventId: number,
+  actor = 'telegram',
+  database: DB = db(),
+): { rencana_id: number | null; pesan: string } {
+  return database.transaction(() => {
+    const ev = getCashEvent(cashEventId, database);
+    if (!ev || ev.status === 'dibatalkan') throw new Error('Transaksi tidak ditemukan.');
+    if (ev.direction !== 'masuk') throw new Error('Top-up diterima harus berupa uang masuk.');
+    if (ev.transfer_group_id) throw new Error('Transaksi ini sudah dipasangkan sebagai transfer internal.');
+
+    const note = ev.note?.includes('Top-up diterima')
+      ? ev.note
+      : [ev.note, 'Top-up diterima (dikonfirmasi pengguna).'].filter(Boolean).join(' | ');
+    recategorize(cashEventId, { kind: 'pemasukan_luar', note }, actor, database);
+    resplitCashEvent(
+      cashEventId,
+      [{ amount_minor: ev.amount_minor, purpose: 'pemasukan', bearer_type: 'saya', category_id: null }],
+      actor,
+      database,
+    );
+    database.prepare(`UPDATE cash_event SET status = 'terkonfirmasi', updated_at = ? WHERE id = ?`)
+      .run(nowIso(), cashEventId);
+
+    const kandidat = database.prepare(`
+      SELECT id FROM topup_plan
+       WHERE status = 'rencana' AND plan_amount_minor = ?
+         AND (account_id IS NULL OR account_id = ?)
+         AND abs(julianday(plan_date) - julianday(?)) <= 3
+       ORDER BY abs(julianday(plan_date) - julianday(?)), id LIMIT 2
+    `).all(ev.amount_minor, ev.account_id, ev.occurred_at.slice(0, 10), ev.occurred_at.slice(0, 10)) as Array<{ id: number }>;
+
+    if (kandidat.length === 1) {
+      setTopupStatus(kandidat[0]!.id, 'diterima', {
+        actual_amount_minor: ev.amount_minor,
+        actual_date: ev.occurred_at.slice(0, 10),
+        cash_event_id: cashEventId,
+        actor,
+      }, database);
+      return { rencana_id: kandidat[0]!.id, pesan: 'Top-up masuk tercatat dan rencana yang cocok ditandai diterima.' };
+    }
+    return {
+      rencana_id: null,
+      pesan: kandidat.length > 1
+        ? 'Top-up masuk tercatat. Ada beberapa rencana yang mirip, jadi tidak dipasangkan otomatis.'
+        : 'Top-up masuk tercatat. Tidak ada rencana top-up yang cocok; tidak dibuat rencana palsu.',
+    };
+  })();
 }

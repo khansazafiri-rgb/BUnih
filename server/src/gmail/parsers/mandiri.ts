@@ -15,13 +15,13 @@ const SENDERS = [
 
 /** Kata kunci arah uang pada notifikasi Mandiri Livin'. */
 const KELUAR = [
-  'transfer berhasil', 'pembayaran berhasil', 'pembelian berhasil', 'transaksi berhasil',
+  'transfer berhasil', 'pembayaran berhasil', 'pembelian berhasil',
   'debet', 'debit', 'uang keluar', 'anda telah melakukan pembayaran', 'top up berhasil',
   'qris', 'tarik tunai',
 ];
 const MASUK = [
   'dana masuk', 'uang masuk', 'kredit', 'transfer masuk', 'anda menerima',
-  'penerimaan dana', 'dana diterima',
+  'penerimaan dana', 'dana diterima', 'rekening dikredit', 'saldo bertambah', 'transfer diterima',
 ];
 
 function tebakJenis(text: string): { kind: CashKind; keyakinan: number } {
@@ -72,9 +72,17 @@ export const mandiriParser: MailParser = {
 
     const adaKeluar = KELUAR.some((k) => hay.includes(k));
     const adaMasuk = MASUK.some((k) => hay.includes(k));
+    // Email penerimaan dana kadang bertajuk "Transfer Berhasil" meskipun
+    // rekening kita DIKREDIT. Pernyataan eksplisit dana masuk harus menang
+    // atas judul generik; jangan salah mencatat top-up sebagai pengeluaran.
+    const kreditEksplisit = /dana masuk|uang masuk|transfer masuk|dana diterima|penerimaan dana|rekening dikredit|saldo bertambah|anda menerima|transfer diterima/.test(hay);
+    const debitEksplisit = /rekening didebet|rekening didebit|dana keluar|uang keluar|pembayaran berhasil|pembelian berhasil|qris|tarik tunai/.test(hay);
     let direction: 'masuk' | 'keluar';
     let keyakinanArah: number;
-    if (adaKeluar && !adaMasuk) {
+    if (kreditEksplisit && !debitEksplisit) {
+      direction = 'masuk';
+      keyakinanArah = 0.95;
+    } else if (adaKeluar && !adaMasuk) {
       direction = 'keluar';
       keyakinanArah = 0.95;
     } else if (adaMasuk && !adaKeluar) {
@@ -107,6 +115,7 @@ export const mandiriParser: MailParser = {
     ]);
     const destTail = findAccountTail(text, [
       'Rekening Tujuan', 'No\\.? Rekening Tujuan', 'Nomor Tujuan', 'Rekening Penerima',
+      'Rekening Dikredit', 'Nomor Rekening Penerima', 'Rekening Anda',
     ], { tanpaCadangan: true });
 
     const jenis = tebakJenis(hay);
@@ -116,14 +125,14 @@ export const mandiriParser: MailParser = {
       direction,
       amount_minor: amount.minor,
       currency: amount.currency,
-      kind: jenis.kind,
+      kind: direction === 'masuk' ? 'pemasukan_luar' : jenis.kind,
       merchant,
       counterparty: merchant,
       reference_no: findReference(text),
-      source_account_tail: sourceTail,
-      source_bank: 'Mandiri',
-      dest_account_tail: destTail,
-      dest_bank: destBankRaw,
+      source_account_tail: direction === 'masuk' ? null : sourceTail,
+      source_bank: direction === 'masuk' ? null : 'Mandiri',
+      dest_account_tail: direction === 'masuk' ? (destTail ?? findAccountTail(text, ['Nomor Rekening', 'No\\.? Rekening'], { tanpaCadangan: true })) : destTail,
+      dest_bank: direction === 'masuk' ? 'Mandiri' : destBankRaw,
       dest_name: merchant,
       dest_is_mine: null,
       note: catatan.length ? catatan.join(' ') : null,
