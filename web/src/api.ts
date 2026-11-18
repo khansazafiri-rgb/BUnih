@@ -48,6 +48,7 @@ export type SaldoRekening = {
   anchor_at: string | null;
   anchor_source: string | null;
   verified: boolean;
+  tidak_wajar: boolean;
   catatan: string[];
 };
 
@@ -60,6 +61,7 @@ export type RingkasanSaldo = {
   dalam_perjalanan_jumlah: number;
   rekening: SaldoRekening[];
   lengkap: boolean;
+  ada_saldo_tidak_wajar: boolean;
   catatan: string[];
 };
 
@@ -513,7 +515,8 @@ export type DataDashboard = {
   uang: {
     saldo_terverifikasi_minor: number | null;
     lengkap: boolean;
-    rekening: Array<{ nama: string; last4: string | null; saldo_minor: number | null; tabungan: boolean }>;
+    rekening: Array<{ nama: string; last4: string | null; saldo_minor: number | null; tabungan: boolean; tidak_wajar: boolean }>;
+    ada_saldo_tidak_wajar: boolean;
     dalam_perjalanan_minor: number;
     catatan: string[];
   };

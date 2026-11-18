@@ -338,3 +338,15 @@ export function pdfTextToCsv(text: string): string {
   }
   return out.join('\n');
 }
+
+export function importHistory(database: DB = db()) {
+  return database
+    .prepare(`SELECT * FROM import_run ORDER BY started_at DESC LIMIT 30`)
+    .all();
+}
+
+export function importItems(runId: number, database: DB = db()) {
+  return database
+    .prepare(`SELECT * FROM import_item WHERE import_run_id = ? ORDER BY id LIMIT 500`)
+    .all(runId);
+}

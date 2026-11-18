@@ -9,6 +9,7 @@ import { migrate } from './db/migrate.js';
 import { seed } from './db/seed.js';
 import { nowIso } from './domain/time.js';
 import { rebuildObligations } from './domain/obligations.js';
+import { pembersihanSekali } from './domain/kemandirian.js';
 import { buatRouter } from './api/routes.js';
 import { createBot, startBot } from './telegram/bot.js';
 import { startScheduler } from './jobs/scheduler.js';
@@ -98,6 +99,13 @@ async function main(): Promise<void> {
   if (migrasi.length) console.log(`[db] migrasi diterapkan: ${migrasi.join(', ')}`);
   const hasilSeed = seed(database);
   if (Object.keys(hasilSeed).length) console.log(`[db] seed: ${JSON.stringify(hasilSeed)}`);
+
+  // Lepaskan sisa data Sheet lama dan rapikan pembayaran ganda dari Gmail (sekali per database,
+  // dengan salinan database dulu). BUNIH_PEMBERSIHAN_OTOMATIS=false untuk melewatinya.
+  if (process.env['BUNIH_PEMBERSIHAN_OTOMATIS'] !== 'false') {
+    const lap = pembersihanSekali(database);
+    if (lap) console.log(`[kemandirian] ${JSON.stringify({ ...lap, bayar_ganda: lap.bayar_ganda.length })}`);
+  }
 
   try {
     rebuildObligations({}, database);

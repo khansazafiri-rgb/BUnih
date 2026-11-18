@@ -95,7 +95,16 @@ export default function Dashboard() {
                 ) : (
                   <>
                     <div className="angka-hero">{rupiah(d.uang.saldo_terverifikasi_minor)}</div>
-                    <p className="penjelas"><ChipAktual /> total dari rekening yang sudah dikonfirmasi</p>
+                    {d.uang.ada_saldo_tidak_wajar ? (
+                      <Catatan peringatan>
+                        Saldo hasil hitungan negatif, jadi angkanya kemungkinan keliru. Email bank biasanya hanya memberi tahu
+                        uang keluar, sehingga uang masuk tidak terhitung sampai kamu mencatatnya. Catat pemasukanmu
+                        (di Telegram cukup ketik, misalnya <em>gaji 3jt</em>), atau{' '}
+                        <a href="#/pengaturan">konfirmasi saldo hari ini</a> supaya hitungan mulai dari angka yang benar.
+                      </Catatan>
+                    ) : (
+                      <p className="penjelas"><ChipAktual /> total dari rekening yang sudah dikonfirmasi</p>
+                    )}
                     <ul className="daftar" style={{ marginTop: 10 }}>
                       {d.uang.rekening.map((r) => (
                         <li key={r.nama}>

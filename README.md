@@ -55,7 +55,7 @@ node server/dist/scripts/contoh.js --hapus  # hapus lagi
 Pengujian:
 
 ```bash
-npm test     # 104 pengujian, termasuk seluruh kasus rawan hitung ganda
+npm test     # termasuk seluruh kasus rawan hitung ganda
 ```
 
 ## Memasang di server
@@ -78,7 +78,7 @@ bash deploy/scripts/kesehatan.sh                             # periksa
 
 | Berkas | Isi |
 |---|---|
-| [docs/01-peta-sheet.md](docs/01-peta-sheet.md) | Peta tab Sheet → fitur aplikasi |
+| [docs/01-peta-sheet.md](docs/01-peta-sheet.md) | Peta tab Sheet → fitur aplikasi (sejarah; Sheet tidak lagi dipakai) |
 | [docs/02-audit-bukti.md](docs/02-audit-bukti.md) | Terverifikasi versus asumsi, per layanan |
 | [docs/03-model-data.md](docs/03-model-data.md) | Model data dan mengapa bentuknya begitu |
 | [docs/04-alur-telegram.md](docs/04-alur-telegram.md) | Perintah, tombol, dan percakapan bot |
@@ -88,6 +88,7 @@ bash deploy/scripts/kesehatan.sh                             # periksa
 | [docs/08-pertanyaan.md](docs/08-pertanyaan.md) | **Yang masih perlu kamu konfirmasi** |
 | [docs/09-v2-audit-dan-rilis.md](docs/09-v2-audit-dan-rilis.md) | **v2: audit, migrasi, rilis, rollback, batasan** |
 | [docs/10-telegram-first.md](docs/10-telegram-first.md) | **Telegram-first: notifikasi interaktif, kategori kustom, menu, rencana 7 hari, rollback** |
+| [docs/11-mandiri-tanpa-sheet.md](docs/11-mandiri-tanpa-sheet.md) | **Berdiri sendiri tanpa Sheet, pembayaran ganda, saldo negatif, rollback** |
 
 ---
 

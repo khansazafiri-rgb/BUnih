@@ -222,18 +222,6 @@ function openingBalance(
       catatan: summary.catatan,
     };
   }
-  const sheet = assumptionAt<number>('saldo_awal_sheet', from, database);
-  if (sheet && typeof sheet.value === 'number') {
-    return {
-      minor: sheet.value,
-      certainty: 'asumsi_sheet',
-      sumber: 'Asumsi saldo awal dari Sheet (belum dikonfirmasi sebagai saldo bank)',
-      catatan: [
-        'Belum ada rekonsiliasi rekening, jadi proyeksi ini memakai asumsi saldo awal dari Sheet. ' +
-          'Angka ini BUKAN saldo bank.',
-      ],
-    };
-  }
   return {
     minor: 0,
     certainty: 'perkiraan',

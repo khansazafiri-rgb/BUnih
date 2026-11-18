@@ -155,17 +155,19 @@ export function layarRekening(database: DB = db()): Layar {
   const baris: string[] = [];
   const tombol: Tombol[] = [];
   let adaBelum = false;
+  let adaNegatif = false;
   for (const a of listAccounts(database, true)) {
     const s = status.get(a.id);
     const bal = accountBalance(a.id, undefined, database);
     const saldo = bal.balance_minor === null ? '<i>saldo belum dikonfirmasi</i>' : `<b>${rp(bal.balance_minor)}</b>`;
     const kondisi = s?.umur_hari === null || s?.umur_hari === undefined ? '⚠️ belum pernah direkonsiliasi' : s.umur_hari === 0 ? '✅ dikonfirmasi hari ini' : `✅ dikonfirmasi ${s.umur_hari} hari lalu`;
     if (bal.balance_minor === null) adaBelum = true;
+    if (bal.tidak_wajar) adaNegatif = true;
     baris.push(`🏦 <b>${esc(a.name)}</b>${a.is_savings_target ? ' (tabungan)' : ''}\n   ${saldo} · ${kondisi}`);
     tombol.push(tombolData(`✅ Konfirmasi saldo ${a.name}`.slice(0, 40), `r:s:${a.id}`));
   }
   return {
-    teks: `🏦 <b>Rekening & saldo</b>\n${baris.join('\n') || 'Belum ada rekening.'}${adaBelum ? '\n\n<i>Saldo hanya ditampilkan bila kamu sudah mengonfirmasinya. Tanpa itu, proyeksi dan peringatan defisit berstatus perkiraan.</i>' : ''}`,
+    teks: `🏦 <b>Rekening & saldo</b>\n${baris.join('\n') || 'Belum ada rekening.'}${adaBelum ? '\n\n<i>Saldo hanya ditampilkan bila kamu sudah mengonfirmasinya. Tanpa itu, proyeksi dan peringatan defisit berstatus perkiraan.</i>' : ''}${adaNegatif ? '\n\n⚠️ <b>Saldo hitungan negatif</b> — hampir pasti ada uang masuk yang belum dicatat (email bank hanya memberi tahu uang keluar). Ketik misalnya <i>gaji 3jt</i> untuk mencatat pemasukan, atau konfirmasi saldo hari ini.' : ''}`,
     tombol: [...tombol.map((t) => [t]), navigasi()],
   };
 }
