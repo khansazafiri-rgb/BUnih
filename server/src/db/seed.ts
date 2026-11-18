@@ -454,22 +454,18 @@ export type ProfilSeed = 'bersih' | 'warisan' | 'otomatis';
  *  - 'bersih'  : instalasi baru tanpa spreadsheet. Hanya kategori, rekening kosong,
  *                pengaturan notifikasi, dan satu rencana dasar. Semua angka diisi pengguna.
  *  - 'warisan' : katalog layanan, tagihan, dan asumsi yang berasal dari Google Sheet lama.
- *  - 'otomatis': database yang sudah berisi layanan/asumsi diperlakukan sebagai 'warisan'
- *                (tidak ada yang berubah); database kosong memakai BUNIH_SEED_PROFILE.
+ *  - 'otomatis': mengikuti BUNIH_SEED_PROFILE (bawaan 'bersih'). Database lama tidak lagi
+ *                dianggap 'warisan' secara otomatis.
  *
  * Semua penyisipan memakai INSERT OR IGNORE: menjalankan ulang tidak menimpa apa pun.
  */
 export function seed(database: DB, opts: { profil?: ProfilSeed } = {}): SeedStats {
   const at = nowIso();
   const profil = opts.profil ?? 'otomatis';
-  const sudahAda =
-    (
-      database
-        .prepare(`SELECT (SELECT COUNT(*) FROM service WHERE COALESCE(note,'') NOT LIKE '%[CONTOH]%') + (SELECT COUNT(*) FROM assumption) AS n`)
-        .get() as { n: number }
-    ).n > 0;
-  const warisan =
-    profil === 'warisan' || (profil === 'otomatis' && (sudahAda || config.BUNIH_SEED_PROFILE === 'warisan'));
+  // Database yang sudah berisi data lama TIDAK lagi diperlakukan sebagai 'warisan' secara otomatis:
+  // itu yang membuat rencana dari Sheet hidup kembali setiap aplikasi dinyalakan.
+  // Katalog Sheet hanya dipakai bila diminta tegas (profil 'warisan' atau BUNIH_SEED_PROFILE=warisan).
+  const warisan = profil === 'warisan' || (profil === 'otomatis' && config.BUNIH_SEED_PROFILE === 'warisan');
   const stats: SeedStats = {};
   const bump = (k: string, n = 1) => {
     stats[k] = (stats[k] ?? 0) + n;

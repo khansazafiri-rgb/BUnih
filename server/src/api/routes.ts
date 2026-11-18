@@ -27,8 +27,7 @@ import { auditFor } from '../domain/audit.js';
 import { listNotificationSettings, setNotificationSetting } from '../notify/index.js';
 import { authUrl, exchangeCode, gmailStatus, oauthConfigured, revokeGmail } from '../gmail/oauth.js';
 import { defaultQuery, syncHistorical, syncIncremental, syncState } from '../gmail/sync.js';
-import { importSheetTab, inspectSheetCsv, importHistory, importItems, FIELDS, type SheetTab } from '../importer/sheet.js';
-import { importBankCsv, inspectBankCsv, pdfTextToCsv } from '../importer/bank.js';
+import { importBankCsv, inspectBankCsv, pdfTextToCsv, importHistory, importItems } from '../importer/bank.js';
 import { buatRouterV2 } from './routesV2.js';
 import { buatToken, hapusSesiCookie, periksaKataSandi, setSesiCookie, sudahMasuk, wajibMasuk } from './auth.js';
 
@@ -988,34 +987,6 @@ export function buatRouter(): Router {
   );
 
   // ----------------------------------------------------------------- impor
-  r.get('/impor/sheet/kolom', bungkus(() => FIELDS));
-  r.post(
-    '/impor/sheet/periksa',
-    bungkus((req) => {
-      const body = z.object({ tab: z.string(), csv: z.string().min(1) }).parse(req.body);
-      return inspectSheetCsv(body.tab as SheetTab, body.csv);
-    }),
-  );
-  r.post(
-    '/impor/sheet',
-    bungkus((req) => {
-      const body = z
-        .object({
-          tab: z.string(),
-          csv: z.string().min(1),
-          mapping: z.record(z.number().nullable()).optional(),
-          dryRun: z.boolean().default(false),
-          label: z.string().optional(),
-        })
-        .parse(req.body);
-      const hasil = importSheetTab(
-        { tab: body.tab as SheetTab, csv: body.csv, mapping: body.mapping, dryRun: body.dryRun, label: body.label },
-        db(),
-      );
-      if (!body.dryRun) rebuildObligations({}, db());
-      return hasil;
-    }),
-  );
   r.post(
     '/impor/mutasi/periksa',
     bungkus((req) => {
@@ -1073,30 +1044,5 @@ export function buatRouter(): Router {
     '/bangun-rencana',
     bungkus(() => rebuildObligations({}, db())),
   );
-  r.get(
-    '/ringkasan-bulan-vs-sheet',
-    bungkus((req) => {
-      const q = z.object({ bulan: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query);
-      const bulan = q.bulan ?? today().slice(0, 7);
-      const lap = monthlyReport(bulan, db());
-      const proj = project(
-        { dari: startOfMonth(`${bulan}-01`), sampai: endOfMonth(`${bulan}-01`) },
-        db(),
-      );
-      return {
-        bulan,
-        aplikasi: {
-          masuk_minor: lap.arus_kas.masuk_minor,
-          keluar_minor: lap.arus_kas.keluar_minor,
-          biaya_pribadi_neto_minor: lap.biaya_pribadi_neto_minor,
-          saldo_akhir_proyeksi_minor: proj.ringkasan.saldo_akhir_minor,
-        },
-        cara_banding:
-          'Ekspor CSV bulanan dari aplikasi, lalu tempelkan di samping tab RINGKASAN Sheet. ' +
-          'Selisih yang wajar: Sheet memakai rencana, aplikasi memakai realisasi + rencana.',
-      };
-    }),
-  );
-
   return r;
 }

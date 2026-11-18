@@ -64,16 +64,6 @@ const JUDUL_NOTIF: Record<string, string> = {
   sinkronisasi_gagal: 'Sinkronisasi Gmail gagal',
 };
 
-const TAB_SHEET = [
-  ['PENGATURAN', 'PENGATURAN'],
-  ['TOPUP', 'TOPUP'],
-  ['BELANJA', 'BELANJA'],
-  ['LANGGANAN', 'LANGGANAN'],
-  ['ARUS_HARIAN', 'ARUS HARIAN (pembanding)'],
-  ['PERIODE_5_HARI', 'PERIODE 5 HARI (pembanding)'],
-  ['RINGKASAN', 'RINGKASAN (pembanding)'],
-] as const;
-
 function BagianRekening() {
   const [nonce, setNonce] = useState(0);
   const data = useApi(() => api.get<Rekening>('/rekening'), [nonce]);
@@ -383,183 +373,6 @@ function BagianTelegram() {
   );
 }
 
-function BagianImporSheet() {
-  const [tab, setTab] = useState<string>('LANGGANAN');
-  const [csv, setCsv] = useState('');
-  const [periksa, setPeriksa] = useState<null | {
-    headers: string[];
-    contoh: string[][];
-    jumlah_baris: number;
-    pemetaan_usulan: Record<string, number | null>;
-    kolom_tak_terpakai: string[];
-    catatan: string[];
-  }>(null);
-  const [pemetaan, setPemetaan] = useState<Record<string, number | null>>({});
-  const [hasil, setHasil] = useState<null | {
-    dibuat: number;
-    diperbarui: number;
-    dilewati: number;
-    tidak_jelas: Array<{ baris: number; alasan: string }>;
-    catatan: string[];
-    dry_run: boolean;
-  }>(null);
-  const [sibuk, setSibuk] = useState(false);
-  const [galat, setGalat] = useState<string | null>(null);
-
-  const bacaBerkas = async (f: File) => {
-    const teks = await f.text();
-    setCsv(teks);
-    setHasil(null);
-    setGalat(null);
-  };
-
-  const jalankanPeriksa = async () => {
-    setSibuk(true);
-    setGalat(null);
-    try {
-      const p = await api.post<typeof periksa>('/impor/sheet/periksa', { tab, csv });
-      setPeriksa(p);
-      setPemetaan(p?.pemetaan_usulan ?? {});
-    } catch (err) {
-      setGalat(err instanceof Error ? err.message : 'Gagal memeriksa.');
-    } finally {
-      setSibuk(false);
-    }
-  };
-
-  const impor = async (dryRun: boolean) => {
-    setSibuk(true);
-    setGalat(null);
-    try {
-      const h = await api.post<typeof hasil>('/impor/sheet', { tab, csv, mapping: pemetaan, dryRun });
-      setHasil(h);
-    } catch (err) {
-      setGalat(err instanceof Error ? err.message : 'Gagal mengimpor.');
-    } finally {
-      setSibuk(false);
-    }
-  };
-
-  return (
-    <Kartu judul="Impor awal dari Google Sheet">
-      <Catatan>
-        Sheet aslimu tidak pernah diubah. Ekspor tab yang ingin diimpor sebagai CSV (File → Download →
-        Comma-separated values), lalu unggah di sini. Impor ulang aman: baris yang sama diperbarui, bukan
-        diduplikasi.
-      </Catatan>
-      <div className="bidang" style={{ marginTop: 10 }}>
-        <label htmlFor="i-tab">Tab</label>
-        <select id="i-tab" value={tab} onChange={(e) => setTab(e.target.value)}>
-          {TAB_SHEET.map(([v, l]) => (
-            <option key={v} value={v}>
-              {l}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="bidang">
-        <label htmlFor="i-file">Berkas CSV</label>
-        <input
-          id="i-file"
-          type="file"
-          accept=".csv,text/csv"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void bacaBerkas(f);
-          }}
-        />
-      </div>
-      <div className="tombol-baris">
-        <button className="tombol" disabled={sibuk || !csv} onClick={() => void jalankanPeriksa()}>
-          Periksa kolom
-        </button>
-        <button className="tombol" disabled={sibuk || !csv} onClick={() => void impor(true)}>
-          Uji coba (tanpa menyimpan)
-        </button>
-        <button className="tombol tombol-utama" disabled={sibuk || !csv} onClick={() => void impor(false)}>
-          Jalankan impor
-        </button>
-      </div>
-
-      {galat && <Catatan peringatan>{galat}</Catatan>}
-
-      {periksa && (
-        <>
-          <h3 className="kartu-judul" style={{ marginTop: 14 }}>
-            Pemetaan kolom ({periksa.jumlah_baris} baris)
-          </h3>
-          {periksa.catatan.map((c, i) => (
-            <Catatan peringatan key={i}>
-              {c}
-            </Catatan>
-          ))}
-          <div className="bidang-baris bidang-baris-2" style={{ marginTop: 8 }}>
-            {Object.keys(pemetaan).map((f) => (
-              <div className="bidang" key={f}>
-                <label htmlFor={`m-${f}`}>{f}</label>
-                <select
-                  id={`m-${f}`}
-                  value={pemetaan[f] === null || pemetaan[f] === undefined ? '' : String(pemetaan[f])}
-                  onChange={(e) =>
-                    setPemetaan({ ...pemetaan, [f]: e.target.value === '' ? null : Number(e.target.value) })
-                  }
-                >
-                  <option value="">— tidak dipakai —</option>
-                  {periksa.headers.map((h, i) => (
-                    <option key={i} value={i}>
-                      {h || `kolom ${i + 1}`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))}
-          </div>
-          {periksa.kolom_tak_terpakai.length > 0 && (
-            <div className="kecil">Kolom tidak dipakai: {periksa.kolom_tak_terpakai.join(', ')}</div>
-          )}
-        </>
-      )}
-
-      {hasil && (
-        <>
-          <h3 className="kartu-judul" style={{ marginTop: 14 }}>
-            Hasil {hasil.dry_run ? 'uji coba' : 'impor'}
-          </h3>
-          <ul className="daftar">
-            <li>
-              <div className="isi">Dibuat</div>
-              <div className="nilai">{hasil.dibuat}</div>
-            </li>
-            <li>
-              <div className="isi">Diperbarui</div>
-              <div className="nilai">{hasil.diperbarui}</div>
-            </li>
-            <li>
-              <div className="isi">Dilewati</div>
-              <div className="nilai">{hasil.dilewati}</div>
-            </li>
-          </ul>
-          {hasil.tidak_jelas.length > 0 && (
-            <>
-              <div className="angka-ket" style={{ margin: '10px 0 4px' }}>
-                Data yang tidak jelas ({hasil.tidak_jelas.length})
-              </div>
-              {hasil.tidak_jelas.slice(0, 20).map((t, i) => (
-                <Catatan peringatan key={i}>
-                  Baris {t.baris}: {t.alasan}
-                </Catatan>
-              ))}
-            </>
-          )}
-          {hasil.catatan.map((c, i) => (
-            <Catatan key={i}>{c}</Catatan>
-          ))}
-        </>
-      )}
-    </Kartu>
-  );
-}
-
 function BagianImporMutasi() {
   const rekening = useApi(() => api.get<Rekening>('/rekening'), []);
   const [akun, setAkun] = useState('');
@@ -742,7 +555,7 @@ function BagianKeamanan() {
         <li>
           <div className="isi">
             <strong>Ekspor transaksi</strong>
-            <div className="kecil">CSV untuk dibandingkan dengan Sheet.</div>
+            <div className="kecil">CSV untuk dibuka di aplikasi spreadsheet apa pun.</div>
           </div>
           <div className="nilai">
             <a className="tombol tombol-kecil" href="/api/ekspor/transaksi.csv">
@@ -813,15 +626,6 @@ export default function Pengaturan() {
       <BagianImporMutasi />
       <BagianNotifikasi />
       <BagianKeamanan />
-
-      <details className="kartu" style={{ marginTop: 14 }}>
-        <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Impor data lama dari Google Sheet (opsional)</summary>
-        <p className="kecil" style={{ margin: '8px 0 12px' }}>
-          BUnih tidak membutuhkan spreadsheet. Bagian ini hanya untuk membawa data lama bila kamu punya. Nilai yang sudah
-          kamu konfirmasi di BUnih tidak akan ditimpa.
-        </p>
-        <BagianImporSheet />
-      </details>
 
       <Kartu judul="Tampilan">
         <div className="bidang">

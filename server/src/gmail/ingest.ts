@@ -412,9 +412,23 @@ function upsertInvoice(
   ].join(':');
 
   const at = nowIso();
-  const existing = database
+  let existing = database
     .prepare(`SELECT id, status FROM invoice WHERE dedupe_key = ?`)
     .get(kunci) as { id: number; status: string } | undefined;
+
+  // Email invoice, pengingat, dan kuitansi dari vendor yang sama sering tanpa nomor invoice yang
+  // sama persis. Layanan + nominal + tanggal yang berdekatan = tagihan yang sama, bukan tagihan baru.
+  if (!existing && !parsed.invoice_no && svc.id && parsed.amount_minor) {
+    const rujukan = parsed.due_date ?? parsed.issued_at ?? parsed.period_start ?? today();
+    existing = database
+      .prepare(
+        `SELECT id, status FROM invoice
+          WHERE service_id = ? AND amount_minor = ? AND currency = ? AND invoice_no IS NULL
+            AND abs(julianday(COALESCE(due_date, issued_at, period_start)) - julianday(?)) <= 20
+          ORDER BY abs(julianday(COALESCE(due_date, issued_at, period_start)) - julianday(?)) LIMIT 1`,
+      )
+      .get(svc.id, parsed.amount_minor, parsed.currency, rujukan, rujukan) as { id: number; status: string } | undefined;
+  }
 
   let invoiceId: number;
   if (existing) {
@@ -518,27 +532,37 @@ function linkReceiptToPayment(
   const vendorNorm = normalizeMerchant(parsed.vendor);
   const svc = resolveServiceId(parsed as { vendor: string; service_slug?: string | null }, database);
 
-  const kondisi: string[] = [
-    `ce.direction = 'keluar'`,
-    `ce.status <> 'dibatalkan'`,
-    `abs(julianday(ce.occurred_at) - julianday(@pada)) <= 7`,
-    `ce.account_id IS NOT NULL`,
-  ];
-  if (currency === 'IDR' && amount) kondisi.push(`ce.amount_minor = @nominal`);
-  else kondisi.push(`(ce.service_id = @service OR ce.merchant_norm LIKE @merchant)`);
+  // Pembayaran yang sama bisa terlihat dari beberapa email (invoice lunas, kuitansi, ucapan terima kasih)
+  // dan dari notifikasi bank. Cocokkan dengan transaksi bank DAN dengan pembayaran sementara dari email
+  // sebelumnya, supaya satu pembayaran tidak menjadi tiga pengeluaran.
+  const adaNominalRupiah = currency === 'IDR' && Boolean(amount);
+  const cocokBank = adaNominalRupiah
+    ? `ce.amount_minor = @nominal`
+    : `(ce.service_id = @service OR ce.merchant_norm LIKE @merchant)`;
+  const cocokSementara =
+    `(ce.invoice_id = @invoice OR ce.service_id = @service OR ce.merchant_norm LIKE @merchant)` +
+    (adaNominalRupiah ? ` AND ce.amount_minor = @nominal` : ``);
 
   const kandidat = database
     .prepare(
-      `SELECT ce.id, ce.amount_minor, ce.invoice_id FROM cash_event ce
-        WHERE ${kondisi.join(' AND ')}
-        ORDER BY abs(julianday(ce.occurred_at) - julianday(@pada)) LIMIT 3`,
+      `SELECT ce.id, ce.amount_minor, ce.invoice_id, ce.account_id FROM cash_event ce
+        WHERE ce.direction = 'keluar' AND ce.status <> 'dibatalkan'
+          AND (
+            (ce.account_id IS NOT NULL
+              AND abs(julianday(ce.occurred_at) - julianday(@pada)) <= 7 AND ${cocokBank})
+            OR
+            (ce.account_id IS NULL AND ce.source = 'gmail'
+              AND abs(julianday(ce.occurred_at) - julianday(@pada)) <= 14 AND ${cocokSementara})
+          )
+        ORDER BY (ce.account_id IS NULL), abs(julianday(ce.occurred_at) - julianday(@pada)) LIMIT 3`,
     )
     .all({
       pada: parsed.occurred_at,
       nominal: amount ?? 0,
       service: svc.id ?? -1,
+      invoice: invoiceId ?? -1,
       merchant: `%${vendorNorm ?? 'tidak-ada'}%`,
-    }) as Array<{ id: number; amount_minor: number; invoice_id: number | null }>;
+    }) as Array<{ id: number; amount_minor: number; invoice_id: number | null; account_id: number | null }>;
 
   if (kandidat.length) {
     const pilih = kandidat[0]!;
@@ -563,7 +587,7 @@ function linkReceiptToPayment(
     summary.catatan.push(
       'Kuitansi ditautkan ke pembayaran yang sudah tercatat dari notifikasi bank (satu peristiwa, dua bukti).',
     );
-    if (kandidat.length > 1) {
+    if (kandidat.filter((k) => k.account_id !== null).length > 1) {
       const dibuat = createDecision(
         {
           kind: 'konfirmasi_kuitansi',

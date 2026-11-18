@@ -29,6 +29,8 @@ export type AccountBalance = {
   movement_since_anchor_minor: number;
   event_count_since_anchor: number;
   verified: boolean;
+  /** true bila saldo hasil hitung negatif: hampir pasti ada pemasukan yang belum tercatat. */
+  tidak_wajar: boolean;
   /** Alasan saldo tidak dapat dipastikan, dalam bahasa manusia. */
   catatan: string[];
 };
@@ -44,6 +46,8 @@ export type BalanceSummary = {
   dalam_perjalanan_jumlah: number;
   rekening: AccountBalance[];
   lengkap: boolean;
+  /** Ada rekening yang saldo hitungnya negatif (pemasukan kemungkinan belum tercatat). */
+  ada_saldo_tidak_wajar: boolean;
   catatan: string[];
 };
 
@@ -108,6 +112,15 @@ export function accountBalance(
   if (!acc.verified) {
     catatan.push('Rekening ini belum dikonfirmasi (4 digit terakhir belum diisi).');
   }
+  const saldo = anchor ? anchor.statement_balance_minor + movement.delta : null;
+  const tidakWajar = saldo !== null && saldo < 0;
+  if (tidakWajar) {
+    catatan.push(
+      'Saldo hasil hitung negatif. Itu hampir pasti berarti ada uang masuk yang belum tercatat ' +
+        '(email bank biasanya hanya memberi tahu uang keluar). Catat pemasukannya, atau konfirmasi ' +
+        'saldo hari ini supaya hitungan dimulai dari angka yang benar.',
+    );
+  }
 
   return {
     account_id: acc.id,
@@ -115,12 +128,13 @@ export function accountBalance(
     bank: acc.bank,
     last4: acc.last4,
     is_savings_target: acc.is_savings_target === 1,
-    balance_minor: anchor ? anchor.statement_balance_minor + movement.delta : null,
+    balance_minor: saldo,
     anchor_at: anchor?.as_of ?? null,
     anchor_source: anchor?.source ?? null,
     movement_since_anchor_minor: movement.delta,
     event_count_since_anchor: movement.n,
     verified: acc.verified === 1,
+    tidak_wajar: tidakWajar,
     catatan,
   };
 }
@@ -177,6 +191,7 @@ export function balanceSummary(
     dalam_perjalanan_jumlah: flight.count,
     rekening,
     lengkap: unverified.length === 0 && flight.count === 0,
+    ada_saldo_tidak_wajar: rekening.some((r) => r.tidak_wajar),
     catatan,
   };
 }
